@@ -1,0 +1,20 @@
+# Index map reconstructed from the images:
+#  1 subject  2 camera  3 tower  4 mask  5 police  7 liberty  9 eye
+# 11 pyramid 12 vote   13 moon  16 rifle 17 gold  19 glove  20 second
+# --- 12-word frame, positions 1-12, unknowns from the thematic pool ---
+subject camera tower mask police @ liberty @ eye @ pyramid vote
+subject camera tower mask police @ liberty @ eye black pyramid vote
+subject camera tower mask police @ liberty order eye @ pyramid vote
+subject camera tower mask police black liberty @ eye @ pyramid vote
+subject camera tower mask police @ liberty @ eye @ pyramid moon
+subject camera tower mask police @ liberty @ eye @ tower vote
+# --- same frame, 'twin' for the two cameras, 'face' for the four faces ---
+subject twin tower mask police @ liberty @ eye @ pyramid vote
+subject camera tower face police @ liberty @ eye @ pyramid vote
+# --- 'space/need/food' instead of pyramid at 11 (Space Needle marks 11) ---
+subject camera tower mask police @ liberty @ eye @ need vote
+subject camera tower mask police @ liberty @ eye @ space vote
+subject camera tower mask police @ liberty @ eye @ food vote
+# --- first word alternatives for the 13th amendment ---
+@ camera tower mask police @ liberty @ eye black pyramid vote
+place camera tower mask police @ liberty @ eye @ pyramid vote

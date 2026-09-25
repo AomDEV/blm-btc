@@ -1,0 +1,14 @@
+# build outputs
+solver/c/blmc
+solver/c/blmc_asan
+solver/c/*.dSYM/
+# run logs, pid files, derived renders (re-creatable; results are summarised in solver/SWEEP.md)
+solver/logs/
+solver/forensics/
+*.pid
+# python / os noise
+__pycache__/
+*.pyc
+.DS_Store
+# scratch
+/tmp/

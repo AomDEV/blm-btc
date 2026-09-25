@@ -1,0 +1,24 @@
+# ---- 15-word frames: the 15 index-mapped words, sorted by their index ----
+# 1 subject 2 camera 3 tower 4 mask 5 police 7 liberty 9 eye 11 pyramid
+# 12 vote 13 moon 16 rifle 17 gold 18 world 19 glove 20 second
+subject camera tower mask police liberty eye pyramid vote moon rifle gold world glove second
+subject camera tower mask police liberty eye pyramid vote moon rifle gold world glove @
+subject camera tower mask police liberty eye pyramid vote moon rifle gold @ glove second
+subject camera tower mask police liberty eye pyramid vote moon rifle gold @ glove @
+subject camera tower mask police liberty eye pyramid vote moon rifle gold @ @ second
+subject camera tower mask police liberty eye @ vote moon rifle gold world glove second
+subject camera tower mask police liberty eye pyramid vote moon @ gold world glove second
+subject camera tower mask police @ eye pyramid vote moon rifle gold world glove second
+@ camera tower mask police liberty eye pyramid vote moon rifle gold world glove second
+subject camera tower mask police liberty @ pyramid vote moon rifle gold world glove second
+subject camera tower mask @ liberty eye pyramid vote moon rifle gold world glove second
+subject camera tower mask police liberty eye pyramid @ moon rifle gold world glove second
+# ---- README's own 15 table words, in table order ----
+subject camera tower mask police liberty eye black pyramid vote moon rifle gold glove apple
+subject camera tower mask police liberty eye black pyramid vote moon rifle gold glove @
+subject camera tower mask police liberty eye black pyramid vote moon rifle gold @ apple
+subject camera tower mask police liberty eye black pyramid vote moon rifle @ glove apple
+# ---- 'black' swapped in for 'world' / 'second' ----
+subject camera tower mask police liberty eye pyramid vote moon rifle gold black glove second
+subject camera tower mask police liberty eye pyramid vote moon rifle gold world glove black
+place camera tower mask police @ liberty @ eye @ pyramid vote

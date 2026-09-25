@@ -1,0 +1,3 @@
+[submodule "BLM_0.2BTC"]
+	path = BLM_0.2BTC
+	url = https://github.com/HomelessPhD/BLM_0.2BTC.git
