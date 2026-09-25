@@ -4,9 +4,10 @@ Runs every check on both builds (blmc_asan first). Exit code 0 only if everythin
   1. --selftest        hardware SHA-256/SHA-512/HMAC/PBKDF2 vs OpenSSL
   2. --derive          seed, master key/chain, 3 addresses vs blm.py (12..24 words)
   3. --list / --count  checksum-survivor set equality vs the Python enumerator
-  4. search            planted hits: partial batches (8 threads) and full 4-way batches (1 thread)
+  4. search            planted hits: partial batches (8 threads) and full N-way batches (1 thread)
+  5. --passfile        planted hit at a non-first passphrase; seeds == survivors x passphrases
 """
-import os, sys, random, subprocess, itertools, tempfile
+import os, sys, re, random, subprocess, itertools, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE))
 import blm, solve
 H = blm.HARD
@@ -88,7 +89,58 @@ def test_plant(b):
     r = run(b, ["--template", path, "--target", "00" * 20, "--threads", "8", "--naddr", "2"], cwd=TMP)
     report("no false hit on absent target", "HIT" not in r.stdout)
 
+def test_passfile(b):
+    """--passfile: one enumeration pass, every survivor x every passphrase.
+    Plants the hit at a NON-first passphrase so a bug that only ever applies the first salt,
+    or that mislabels which lane a hit came from, cannot pass."""
+    random.seed(5)
+    known = "legal winner thank year wave sausage worth useful legal winner thank yellow".split()
+    pool = lambda w, n: random.sample([x for x in blm.WORDLIST if x != w], n - 1) + [w]
+    tmpl = " ".join(known[:9] + ["{" + "|".join(pool("winner", 12)) + "}", known[10],
+                                 "{" + "|".join(pool("yellow", 12)) + "}"])
+    path = f"{TMP}/t_pass.txt"; open(path, "w").write(tmpl)
+    slots = solve.parse_template(tmpl)
+    nvalid = sum(blm.mnemonic_checksum_ok(list(c)) for c in itertools.product(*slots))
+    others = ["", "TUESDAY", "blm", "I can't BREATHE", "y" * 150, "05.25.20", "CHaRLy", "1865"]
+    ok_all = True; detail = []
+    # several list lengths and hit positions, so the winning pair lands in both interleave lanes
+    for npass, idx in ((7, 4), (6, 3), (5, 1)):
+        pw = f"secret{idx}"
+        lines = others[:idx] + [pw] + others[idx:npass - 1]
+        pf = f"{TMP}/pf_{npass}_{idx}.txt"; open(pf, "w").write("\n".join(lines) + "\n")
+        tgt = blm.h160s(blm.derive(blm.master_from_seed(blm.mnemonic_to_seed(" ".join(known), pw)),
+                                   (44 | H, 0 | H, 0 | H, 0, 1)))[0].hex()
+        for thr in ("1", "8"):
+            hitf = f"{TMP}/HIT.txt"
+            if os.path.exists(hitf): os.remove(hitf)
+            r = run(b, ["--template", path, "--passfile", pf, "--target", tgt, "--threads", thr, "--naddr", "2"], cwd=TMP)
+            hits = [l for l in r.stdout.split("\n") if "HIT" in l]
+            good = (len(hits) == 1 and "'" + " ".join(known) + "'" in hits[0]
+                    and "path=m/44h/0h/0h/0/1" in hits[0] and f"passphrase='{pw}'" in hits[0]
+                    and os.path.exists(hitf) and f"passphrase='{pw}'" in open(hitf).read()
+                    and "ERROR" not in r.stderr)
+            if not good: ok_all = False; detail.append(f"npass={npass} idx={idx} thr={thr}: {hits}")
+    report("planted hit at a non-first passphrase (3 list positions x 1 and 8 threads)", ok_all, "; ".join(detail))
+    # arithmetic: every survivor must be tried against every passphrase, exactly once.
+    # blmc skips blank lines (a trailing newline must not add an empty-passphrase pass), so count
+    # the same way it does - and check below that it really did skip the blank one.
+    pf = f"{TMP}/pf_7_4.txt"; lines = [l for l in open(pf).read().split("\n") if l.strip()]
+    npass = len(lines)
+    r = run(b, ["--template", path, "--passfile", pf, "--target", "00" * 20, "--threads", "8", "--naddr", "2"], cwd=TMP)
+    m = re.search(r"done in [\d.]+s: \d+ combos, (\d+) seeds", r.stderr)
+    got = int(m.group(1)) if m else -1
+    report("seeds == survivors x passphrases (blank lines skipped)", got == nvalid * npass,
+           f"{got} vs {nvalid} x {npass}")
+    report("no false hit across the whole sweep", "HIT" not in r.stdout)
+    # blank/whitespace lines are skipped, so a trailing newline cannot silently double work
+    pf2 = f"{TMP}/pf_blank.txt"; open(pf2, "w").write("\n\nTUESDAY\n\n   \nblm\n\n")
+    r = run(b, ["--template", path, "--passfile", pf2, "--target", "00" * 20, "--threads", "4", "--naddr", "2"], cwd=TMP)
+    m = re.search(r"done in [\d.]+s: \d+ combos, (\d+) seeds", r.stderr)
+    got = int(m.group(1)) if m else -1
+    report("blank lines in a passfile are skipped", got == nvalid * 2, f"{got} vs {nvalid} x 2")
+
+
 for b in ("blmc_asan", "blmc"):
     print(f"[{b}]")
-    for t in (test_selftest, test_derive, test_passphrase, test_list, test_plant): t(b)
+    for t in (test_selftest, test_derive, test_passphrase, test_list, test_plant, test_passfile): t(b)
 print("ALL PASS" if not fails else f"{fails} FAILED"); sys.exit(1 if fails else 0)
