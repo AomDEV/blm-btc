@@ -1,7 +1,8 @@
 // BLM puzzle GPU kernels. Appended after the 11 base files from bip39-solver-gpu
 // (common, ripemd, sha2, mnemonic_constants, secp256k1_*, address).
 //
-// Both kernels take NW ushort word-indices per work-item (any BIP39 length),
+// Both kernels take NW ushort word-indices per work-item (any BIP39 length), the padded PBKDF2
+// salt block,
 // a real target hash160 and a canary hash160, and write result[gid]:
 //     p+1              real hit at path-id p
 //     0x80000000|(p+1) canary hit at path-id p   (proves the launch ran)
@@ -10,7 +11,47 @@
 // blm_check      : narrow  - m/44'/0'/0'/0/i, i < n_addr           (path-id = i)
 // blm_check_wide : wide    - the same 101 paths as the CPU's WIDE_TREE (ids below)
 
-static void bip39_seed(uchar *mnemonic, int L, uchar *seed) {
+// --- PBKDF2-HMAC-SHA512 with HMAC midstates -------------------------------------------------
+// The original kernel called sha512(joined, 192) four times per round, and each of those calls
+// re-compressed the 128-byte ipad/opad block from the initial state: 4 block compressions per
+// round where 2 are needed. Computing the ipad/opad midstates once per work-item halves the
+// kernel's SHA-512 work. This is the same structure the C engine uses (sha512_fast.h).
+//
+// The salt block is handed in as 16 big-endian words already padded for a 128+saltlen byte
+// message, so the passphrase costs one 128-byte read per work-item and NOTHING in the kernel
+// depends on its length: the program is built once and reused for every passphrase in a sweep.
+// (Passing the salt *length* as an argument instead measured 35% slower - the Apple compiler
+// then stops specialising sha512() at its call sites. One fixed-size block avoids that.)
+
+__constant ulong H512_0[8] = {
+  0x6a09e667f3bcc908UL, 0xbb67ae8584caa73bUL, 0x3c6ef372fe94f82bUL, 0xa54ff53a5f1d36f1UL,
+  0x510e527fade682d1UL, 0x9b05688c2b3e6c1fUL, 0x1f83d9abfb41bd6bUL, 0x5be0cd19137e2179UL };
+
+// sha2.cl #undefs F0/F1 at its end; ROUND_STEP_SHA512 still needs them. Same definitions.
+#define F1(x,y,z) (bitselect(z,y,x))
+#define F0(x,y,z) (bitselect (x, y, ((x) ^ (z))))
+
+// One 128-byte block from an arbitrary state. Win holds the 16 message words already in
+// big-endian order (i.e. what sha512() would produce with SWAP512), so no byte shuffling.
+static void sha512_block(ulong *State, const ulong *Win) {
+  ulong W[0x50];
+  for (int i = 0; i < 16; i++) W[i] = Win[i];
+  for (int i = 16; i < 80; i++) W[i] = W[i-16] + little_s0(W[i-15]) + W[i-7] + little_s1(W[i-2]);
+  ulong a = State[0], b = State[1], c = State[2], d = State[3];
+  ulong e = State[4], f = State[5], g = State[6], h = State[7];
+  for (int i = 0; i < 80; i += 16) { ROUND_STEP_SHA512(i) }
+  State[0] += a; State[1] += b; State[2] += c; State[3] += d;
+  State[4] += e; State[5] += f; State[6] += g; State[7] += h;
+}
+
+// A 64-byte digest (held as 8 big-endian state words) as one padded block of a 192-byte message.
+#define MK_DIGEST_BLOCK(W, ST) { \
+  for (int i = 0; i < 8; i++) (W)[i] = (ST)[i]; \
+  (W)[8] = 0x8000000000000000UL; \
+  for (int i = 9; i < 15; i++) (W)[i] = 0UL; \
+  (W)[15] = 192UL * 8UL; }
+
+static void bip39_seed(uchar *mnemonic, int L, __global const ulong *saltw, uchar *seed) {
   uchar key[128];
   for (int x = 0; x < 128; x++) key[x] = 0;
   if (L > 128) {                       // RFC 2104: pre-hash keys longer than the block
@@ -23,25 +64,34 @@ static void bip39_seed(uchar *mnemonic, int L, uchar *seed) {
   } else {
     for (int x = 0; x < L; x++) key[x] = mnemonic[x];
   }
-  uchar ipad[128], opad[128];
-  for (int x = 0; x < 128; x++) { ipad[x] = key[x] ^ 0x36; opad[x] = key[x] ^ 0x5c; }
-  uchar salt[12] = { 109, 110, 101, 109, 111, 110, 105, 99, 0, 0, 0, 1 };
-  uchar joined[256];
-  uchar r[64];
-  for (int x = 0; x < 256; x++) joined[x] = 0;
-  for (int x = 0; x < 128; x++) joined[x] = ipad[x];
-  for (int x = 0; x < 12; x++) joined[128 + x] = salt[x];
-  sha512((ulong *)joined, 140, (ulong *)r);
-  copy_pad_previous(opad, r, joined);
-  sha512((ulong *)joined, 192, (ulong *)r);
-  for (int x = 0; x < 64; x++) seed[x] = r[x];
+  // ipad / opad midstates: computed once, reused by all 4096 HMAC halves
+  ulong ist[8], ost[8], W[16], kw;
+  for (int i = 0; i < 8; i++) { ist[i] = H512_0[i]; ost[i] = H512_0[i]; }
+  for (int i = 0; i < 16; i++) { kw = SWAP512(((ulong *)key)[i]); W[i] = kw ^ 0x3636363636363636UL; }
+  sha512_block(ist, W);
+  for (int i = 0; i < 16; i++) { kw = SWAP512(((ulong *)key)[i]); W[i] = kw ^ 0x5c5c5c5c5c5c5c5cUL; }
+  sha512_block(ost, W);
+
+  ulong in[8], out[8], T[8];
+  // U1 = HMAC(key, salt || INT(1)) - one host-built padded block
+  for (int i = 0; i < 8; i++) in[i] = ist[i];
+  for (int i = 0; i < 16; i++) W[i] = saltw[i];         /* __global -> private, once per work-item */
+  sha512_block(in, W);
+  MK_DIGEST_BLOCK(W, in);
+  for (int i = 0; i < 8; i++) out[i] = ost[i];
+  sha512_block(out, W);
+  for (int i = 0; i < 8; i++) T[i] = out[i];
+
   for (int n = 1; n < 2048; n++) {
-    copy_pad_previous(ipad, r, joined);
-    sha512((ulong *)joined, 192, (ulong *)r);
-    copy_pad_previous(opad, r, joined);
-    sha512((ulong *)joined, 192, (ulong *)r);
-    for (int x = 0; x < 64; x++) seed[x] ^= r[x];
+    MK_DIGEST_BLOCK(W, out);
+    for (int i = 0; i < 8; i++) in[i] = ist[i];
+    sha512_block(in, W);
+    MK_DIGEST_BLOCK(W, in);
+    for (int i = 0; i < 8; i++) out[i] = ost[i];
+    sha512_block(out, W);
+    for (int i = 0; i < 8; i++) T[i] ^= out[i];
   }
+  for (int i = 0; i < 8; i++) ((ulong *)seed)[i] = SWAP512(T[i]);
 }
 
 static int eq20(uchar *a, uchar *b) {
@@ -50,7 +100,8 @@ static int eq20(uchar *a, uchar *b) {
 }
 
 // Build the mnemonic string and derive the BIP32 master key.
-static void master_from_indices(__global const ushort *idx, uint NW, extended_private_key_t *m) {
+static void master_from_indices(__global const ushort *idx, uint NW,
+                                __global const ulong *saltw, extended_private_key_t *m) {
   uchar mnemonic[256];
   int L = 0;
   for (uint w = 0; w < NW; w++) {
@@ -61,7 +112,7 @@ static void master_from_indices(__global const ushort *idx, uint NW, extended_pr
   }
   L--;
   uchar seed[64];
-  bip39_seed(mnemonic, L, seed);
+  bip39_seed(mnemonic, L, saltw, seed);
   new_master_from_seed(BITCOIN_MAINNET, seed, m);
 }
 
@@ -80,12 +131,12 @@ static uint test_key(extended_private_key_t *k, uchar *tgt, uchar *cn, uint p) {
 
 __kernel void blm_check(__global const ushort *indices, const uint NW, const uint n_addr,
                         __global const uchar *target, __global const uchar *canary,
-                        __global uint *result) {
+                        __global const ulong *saltw, __global uint *result) {
   uint gid = get_global_id(0);
   uchar tgt[20], cn[20];
   for (int j = 0; j < 20; j++) { tgt[j] = target[j]; cn[j] = canary[j]; }
   extended_private_key_t k;
-  master_from_indices(indices + gid * NW, NW, &k);
+  master_from_indices(indices + gid * NW, NW, saltw, &k);
   hardened_private_child_from_private(&k, &k, 44);
   hardened_private_child_from_private(&k, &k, 0);
   hardened_private_child_from_private(&k, &k, 0);
@@ -119,12 +170,12 @@ static uint scan_chain(extended_private_key_t *chain, uint n, uint base, uchar *
 //  101-112 m/44'/0'/0'/0/i for i = 20..31 (appended; the image's 20 and 21 live here)
 __kernel void blm_check_wide(__global const ushort *indices, const uint NW, const uint n_addr,
                              __global const uchar *target, __global const uchar *canary,
-                             __global uint *result) {
+                             __global const ulong *saltw, __global uint *result) {
   uint gid = get_global_id(0);
   uchar tgt[20], cn[20];
   for (int j = 0; j < 20; j++) { tgt[j] = target[j]; cn[j] = canary[j]; }
   extended_private_key_t m;
-  master_from_indices(indices + gid * NW, NW, &m);
+  master_from_indices(indices + gid * NW, NW, saltw, &m);
   uint hit = test_key(&m, tgt, cn, 100);                       // bare master
 
   extended_private_key_t a, c;
