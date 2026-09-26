@@ -1281,3 +1281,25 @@ wrong word, and no word swap can fix that.
    {second|blood|canvas|hood}@20 {black|real|food}@21, rest fixed): 233,280 combos, **1,791 checksum-valid,
    0 hits on 12 paths x 2 key forms** (0.3 s). Also the structured black@21 / real@21 families by hand:
    600 phrases, 6 checksum-valid, none derive.
+
+## 2026-09-26 night — new-theory round: what was tested and what it rules out
+* **Count-words by the picture's own mechanism** (camera x2, mask x4, crown rays x7 → object): Leopold's
+  coat has 8 buttons, but `button` is **not a BIP39 word**. The object bearing the count (`uniform`),
+  and the bust's other words (medal, bag, hood, blood, canvas) at 8, with every other slot at its
+  evidence alternates: 874,800 combos, 6,800 valid, 0 hits (12 paths x 2 key forms). `window`, `finger`,
+  `brick`, `cable`, `lens`, `medal`, `bag`, `hood`, `canvas`, `uniform` are BIP39; `button`, `screw`,
+  `star`, `stripe`, `scarf`, `wreath`, `fist`, `needle`, `syringe`, `vial` are not.
+* **The "5th-letter" typo pattern**: `creeks` sits in the 5th letter of BRAVE and `sing` in the 5th letter
+  of NEW WORLD (both rows' 5th letter). The README's `arrrived` (3 r's) in the 5th letter of WELCOME
+  **does not hold at 7x** — the O of WELCOME reads `which arrived first` with two r's. So 2 of 3 rows,
+  not 3 of 3.
+* **Deductive use of the checksum.** For a fixed 1-20 exactly 16 words are legal at 21. Tidy 1-20 →
+  {analyst bone congress despair earth february ghost journey melody over prosper rely scatter task
+  uniform visit}: only `uniform` (the bust's coat) and `earth` (the map) are depictable; both derive to
+  nothing. With `hand`@19 → {alley box clip cute enhance fashion grunt law lottery panic puzzle reopen
+  slim swallow upper weapon}: weapon/box/law/puzzle/upper/clip derive to nothing. **So the tidy 1-20 is
+  wrong in at least one place even if the 21st word is unknown.**
+* **One or two wrong words, replaced by ANY picture word** (112-word inventory incl. this round's
+  additions): 18 one-slot + 20,384 two-slot checksum-valid phrases, all derived on 12 paths x 2 key
+  forms: **none.** So no single or double word swap within the picture's vocabulary repairs the tidy map;
+  if the map is close, a *position* is wrong, or a word is outside the 112-word inventory.
