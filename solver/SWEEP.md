@@ -1160,3 +1160,22 @@ inventory pool do not contain the phrase on any of 12 paths x 2 key forms. So ei
 second is now the cheaper hypothesis to test — `queue7.lst` opens two of {8,10,15,21} to all 2048 words
 (six frames, ~265 M survivors each) and `t21r_alt.txt` swaps the plausible alternates for the high slots
 (twin/end/debate/gun/weapon/price/brave/welcome/hand). Those are M4-sized (queue7 ≈ 9 h there).
+
+### queue6 entries 17-20 (M1, 16:08-17:32) — all negative
+| run | derivations | rate | result |
+|---|---|---|---|
+| t21r_t14_r6 x 147 passphrases (full list incl. the 25 new) | 75,307,365 | 18,460/s | 0 hits |
+| t21r_t8_r6 x top-30 passphrases | 15,362,430 | 18,366/s | 0 hits |
+| t21r_t14_r15 x top-30 passphrases | 15,383,370 | 18,395/s | 0 hits |
+| t21r_t14_r6 checksum-free (all 65,610,000 combos) | 65,610,000 | 19,367/s | 0 hits |
+So with `this`@14 + `real`@6 and the other four slots over the 90-pool, neither a passphrase from the
+147-list nor an invalid checksum rescues the frame. Next: t21x2 (slots 6 and 14 open), t21r_alt,
+and the coverage tail; queue7 (open pairs) on the M4.
+
+### queue6 entries 21-22 — t21x2 (slots 6 AND 14 fully open, 8/10/15/18/21 as alternates) — negative
+29,506,599 checksum-valid phrases: std n2 in 1,581 s (18,662/s) and the ext path set in 3,380 s
+(8,730/s), both key forms, 0 hits. So with slots 6 and 14 unrestricted (any of 2048 words each) and the
+contested slots limited to {black|brave|food|flag|first|order} @8, {order|black|first} @10,
+{brave|food|real|black|flag} @15, {world|brave} @18, {food|world|real|black|brave} @21, the phrase is not
+there. Remaining on this machine: the coverage tail (t21f/pp/pq passphrases and checksum-free, ext on
+t21g/t21h and the old frames, the 25 new passphrases, t21r_alt).
