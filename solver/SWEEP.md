@@ -1303,3 +1303,53 @@ wrong word, and no word swap can fix that.
   additions): 18 one-slot + 20,384 two-slot checksum-valid phrases, all derived on 12 paths x 2 key
   forms: **none.** So no single or double word swap within the picture's vocabulary repairs the tidy map;
   if the map is close, a *position* is wrong, or a word is outside the 112-word inventory.
+
+## 2020-news pass (agent, 2026-09-27) — the position rule, confirmed by elimination
+Scored every candidate rule against the 14 trusted positions: **day-of-month 0/14, month 2/14 (both
+coincide with drawn counts), age 0/14; "a count or label drawn in the picture" 11/14; "a numeral inherent
+in the subject's name" 4/14 (M16, 18 chapters, CVD19, Leopold II); the union 14/14.** So no headline date
+is a position. News only supplies a number when it is part of a name. For the open slots the same test
+gives: food@21 (Century 21 Exposition; the Needle also opened 21 Apr 1962) strong; order@10 (the phrase
+occurs once, in ch. 10) strong; brave@15 medium (frequency peak, ch. 8 is the first occurrence);
+this@14, black@8, real@6 — nothing in 2020 news attaches those numbers (8:46 is the only strong 8 and
+belongs to the Floyd panel, whose words breathe/breath are not BIP39). 9:29 is a 2021 figure and cannot
+be intended; 8:46 was corrected to 7:46 on 17 Jun 2020.
+
+**Source of the Latin line corrected.** "Esse quam niger es, sic dixit caccabus ollae" is in no revision
+of the English Wikipedia article. It is entry 81677 of the Latin–Belarusian dictionary of proverbs on
+slounik.org, and in verbum.by's "Six-language dictionary of proverbs, sayings and winged words" (1993),
+whose Russian gloss is exactly the README's sentence: "Смотри, какой ты чёрный, так сказал котелок
+горшку" (fetched 2026-09-27). The puzzle's Latin therefore came from a Belarusian reference work — an
+author pointer (Belarus, 2020: the 9 Aug election and protests) worth remembering for passphrase lists:
+Жыве Беларусь / Zhyve Belarus / 09.08.20 / Лукашенко / БЧБ. Not run.
+
+Other corrections from the pass: the Ghent Leopold bust was defaced 2 Jun 2020 (removed 30 Jun); Netflix
+freed "13th" on 17 Apr 2020, before Floyd; NOVUS ORDO SECLORUM is 17 letters (only ANNUIT COEPTIS and
+E PLURIBUS UNUM are 13); the Norinco CQ is made by Sichuan Changqing; Blackout Tuesday was 2 Jun 2020
+(the one 2020 pairing of "black" with "Tuesday").
+
+## Online traces (agent, 2026-09-27) — the README's two "leaks" are dead, and the author never spoke
+* **Beaneater00** (891 edits, an anti-vandal patroller, banned 2021 for unrelated edit-warring): his only
+  edit to "The pot calling the kettle black" (rev 982443674, 2020-10-08 05:25:53 UTC) restores a
+  DEFAULTSORT line and `[[Category:Internet slang]]` removed 14 s earlier by **188.49.125.254 (Riyadh,
+  Saudi Telecom)**, a link-spamming IP with 21 housekeeping edits. Nothing added, no words, no numbers.
+  The 05:25 is a coincidence (the Reddit post came four hours later, 09:25:30 UTC).
+* The Latin sentence was **never on any Wikipedia** (en/ru/be/la, insource searches 0 hits, rev 977612957
+  checked). Source: the 1993 Belarusian six-language proverb dictionary (verbum.by / slounik.org 81677).
+* **u/stsh_n**: account created 2020-10-08, one post at 09:25:30 UTC (a Thursday), empty body, image on
+  i.redd.it, zero comments ever. No bitcointalk statement exists from the author (topic 5404767 was opened
+  by a solver in 2022). Every "no passphrase" / "12 words" claim online is a solver's inference.
+* Instagram CGED2CMBTzD decodes (snowflake) to 2020-10-08 ≈01:04 UTC, ~8 h before the post; Charly
+  Palmer is an Atlanta painter with no crypto/Russia link — implausible as author; "CHaRLy"/"CHR" is a
+  credit or imitation.
+* The deleted GitHub (AlberTajuelo/bitcoin-0.2-image-puzzle, Wayback 2023-07-20) is the README's
+  ancestor; only extras: a privatekeys.pw link and the note that Gravity Falls books exist mostly in
+  Russian. Community items worth knowing: ArmaCorex scanned 377.2 G 12-word mnemonics (±passphrase) over
+  the hint pool — no hit; a bitcointalk argument that `breathe` (in Electrum v1's list, not BIP39) must
+  be the passphrase because `this`/`food`/`one` are BIP39-only; a 2022 Reddit claim of tiny numerals on
+  objects (7 Liberty shoulder, 4 hair, 10/19 rifle, 1 Trump collar, 2/3 Biden neck, 11 Latin ribbon,
+  9 near BREATHE) — checked below.
+* **The "hidden tiny numerals" claim checked** (high-pass, 3-14x): Liberty's shoulder brooch is a plain
+  oval (no 7); nothing in her hair; Trump's collar and Biden's neck carry no digits; the Latin ribbon is
+  plain; the rifle receiver has one faint, ambiguous mark at ≈(817,698) that reads as traced stock
+  line-art detail, not a legible 10 or 19. Negative.
