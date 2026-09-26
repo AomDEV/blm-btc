@@ -1179,3 +1179,7 @@ contested slots limited to {black|brave|food|flag|first|order} @8, {order|black|
 {brave|food|real|black|flag} @15, {world|brave} @18, {food|world|real|black|brave} @21, the phrase is not
 there. Remaining on this machine: the coverage tail (t21f/pp/pq passphrases and checksum-free, ext on
 t21g/t21h and the old frames, the 25 new passphrases, t21r_alt).
+
+**2026-09-26 19:00 — queue6 stopped by the user at entry 23** (t21f x 147 passphrases had just started;
+entries 23-34 — the coverage tail and t21r_alt — did not run). Reason given: brute force over guessed
+frames does not guarantee a hit. State: every run listed above is negative; nothing is running.
