@@ -1,9 +1,11 @@
 #!/bin/zsh
 # Stop a search launched by run.sh: kills the whole process group, so no orphaned Pool workers.
-# usage: ./stop.sh <name>     or   ./stop.sh --orphans   (kill any ppid-1 python worker burning cpu)
-cd /Users/aom/Desktop/Workspace/claude/blm-btc/solver
+# usage: ./stop.sh <name>     or   ./stop.sh --orphans   (kill any ppid-1 worker burning cpu)
+cd "${0:A:h}"                       # the solver dir this script lives in - never hardcode it
 if [ "$1" = "--orphans" ]; then
-  ps -eo pid,ppid,pcpu,command | grep "[P]ython" | awk '$2==1 && $3>5 {print $1}' | while read p; do kill -9 $p && echo "killed orphan $p"; done
+  # match blmc too, not just Python: the C engine is spawned by cgpu.py and outlives a killed parent
+  ps -eo pid,ppid,pcpu,command | grep -E "[P]ython|[p]ython3|[b]lmc" | awk '$2==1 && $3>5 {print $1}' \
+    | while read p; do kill -9 $p && echo "killed orphan $p"; done
   exit 0
 fi
 name=$1; pid=$(cat logs/$name.pid 2>/dev/null)

@@ -16,15 +16,17 @@ import multiprocessing as mp
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
-def _worker(mode, n_addr, inq, outq):
+def _worker(mode, n_addr, passphrase, inq, outq):
     sys.path.insert(0, HERE); sys.path.insert(0, os.path.dirname(HERE))
     import gpu as G
-    g = G.GPU(n_addr=n_addr, mode=mode, verbose=False)
+    g = G.GPU(n_addr=n_addr, mode=mode, verbose=False, passphrase=passphrase)
     outq.put(("ready", g.paths, g.batch))
     while True:
         item = inq.get()
         if item is None:
             return
+        if item[0] == "passphrase":              # swaps the salt buffer; no program rebuild
+            g.set_passphrase(item[1]); outq.put(("passok", item[1])); continue
         job_id, tuples, batch = item
         g.batch = batch
         try:
@@ -36,8 +38,8 @@ def _worker(mode, n_addr, inq, outq):
 
 class GPUProc:
     """Drop-in for gpu.GPU: .check(tuples) -> uint32 array, .paths, .mode, .batch, .kills"""
-    def __init__(self, mode="narrow", n_addr=32, batch=4096, deadline=None, verbose=True):
-        self.mode, self.n_addr = mode, n_addr
+    def __init__(self, mode="narrow", n_addr=32, batch=4096, deadline=None, verbose=True, passphrase=""):
+        self.mode, self.n_addr, self.passphrase = mode, n_addr, passphrase
         self.batch = batch if mode == "narrow" else min(batch, 1024)
         self.kills = 0; self.hangs = 0
         self._next = 0; self.inflight = {}
@@ -49,10 +51,10 @@ class GPUProc:
     def _start(self):
         ctx = mp.get_context("spawn")
         self.inq, self.outq = ctx.Queue(), ctx.Queue()
-        self.proc = ctx.Process(target=_worker, args=(self.mode, self.n_addr, self.inq, self.outq), daemon=True)
+        self.proc = ctx.Process(target=_worker, args=(self.mode, self.n_addr, self.passphrase, self.inq, self.outq), daemon=True)
         self.proc.start()
-        tag, paths, batch = self.outq.get(timeout=120)
-        assert tag == "ready"
+        tag, paths, batch = self.outq.get(timeout=180)
+        assert tag == "ready"                    # a restart re-creates the worker with self.passphrase
         self.paths = paths
         if self.verbose:
             print(f"[gpu-proc] worker pid {self.proc.pid} ready: mode={self.mode}, {len(self.paths)} paths, batch {self.batch}, deadline {self.deadline}s/launch")
@@ -68,6 +70,15 @@ class GPUProc:
             print(f"\n[gpu-proc] {why}: killed worker, batch -> {self.batch}, restarting; re-submitting {len(self.inflight)} in-flight jobs")
         self._start()
         self._resubmit_all()
+
+    def set_passphrase(self, passphrase):
+        """Switch the salt. Caller must have drained every in-flight job first: results already in
+        flight were computed with the previous salt."""
+        assert not self.inflight, "set_passphrase with jobs in flight"
+        self.passphrase = passphrase
+        self.inq.put(("passphrase", passphrase))
+        tag, got = self.outq.get(timeout=180)
+        assert tag == "passok" and got == passphrase
 
     # ---- non-blocking interface: submit() / collect() ----
     def submit(self, tuples):

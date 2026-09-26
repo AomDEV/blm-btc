@@ -686,6 +686,115 @@ inventory words the CPU pool does not contain: 47^5 = 229,345,007 combos ->
 kills detected by the embedded canary and recovered. Paths: m/44'/0'/0'/0/0..19
 (narrow kernel). Every launch canary-verified.
 
+## Engine speed-up, measured on an M3 (2026-09-26)
+
+Machine: Apple M3, 4 performance + 4 efficiency cores, 10-core GPU. Reference workload is the
+same 21-word frame as the C-engine table below (`t21d.txt`, 229,345,007 combos, 1,791,122
+checksum-valid seeds, paths m/44'/0'/0'/0/{0,1}). Baseline is the pre-change engine built from
+`HEAD`, with only its progress poll tightened so its wall clock is not rounded up to the next 2 s.
+Every A/B below is interleaved old/new to keep thermal drift out of the comparison.
+
+| workload | before | after | |
+|---|---|---|---|
+| full frame | 79.4 s — 22,562 seeds/s | **42.5 s — 42,101 seeds/s** | **1.87x** |
+| 20-passphrase sweep (`t21d` with one slot pinned, 38,214 survivors) | 35.0 s | **19.8 s** | **1.77x** |
+
+### Where the time goes, and what that rules out
+`blmc --bench` measures each component on one core. The decisive pair is PBKDF2 against the raw
+compression loop with no PBKDF2 glue around it:
+
+    pbkdf2 x1 : 105.7 ns/block      raw x1 : 79.8 ns/block
+    pbkdf2 x2 :  43.9 ns/block      raw x2 : 44.2 ns/block
+    pbkdf2 x4 :  46.2 ns/block      raw x4 : 42.7 ns/block
+    ec derive :  37.9 us/seed (4 pubkey mults)    pubkey33 : 8.7 us each
+    enumerate :  56.9 M combos/s
+
+A seed costs ~218 us on one core: PBKDF2 179 us (83%), EC 38 us (17%), enumeration ~1%.
+**pbkdf2 x2 is within 1% of raw x2**, so the byte-swapping and re-padding between rounds is free
+and the SHA-512 unit is the wall — 44 ns per 128-byte block is ~1.4 cycles/byte, the documented
+Apple hardware rate. Two independent facts follow, both measured rather than assumed:
+
+* rewriting `st_to_bytes` in NEON or hoisting the padding out of the round loop would buy ~0;
+* x4 is no faster than x2 (the unit saturates at two interleaved streams), so wider interleaving
+  is pointless and `NWAY` now defaults to **2** — same rate, half the register pressure.
+
+So **no 2x exists on the CPU side of this algorithm**: 83% of a seed is already running at the
+silicon's throughput. Everything gained on the CPU came out of the other 17%, and the rest of the
+speed-up came from the GPU, which was not being used at all.
+
+Also measured and rejected: rebuilding libsecp256k1 with `ECMULT_GEN_KB=86` and
+`-mcpu=apple-m3 -flto`. Homebrew's 0.8.0 already defaults to the 86 KB table, and the local build
+came out *slower* (9.33 vs 8.85 us per `pubkey33`). No change made.
+
+### What actually changed
+
+| change | effect |
+|---|---|
+| `check_seed` computed `pubkey33(chain.k)` once per address; every leaf under m/44'/0'/0'/0 shares that parent pubkey | 5 EC mults/seed -> 4 |
+| `hash160` used OpenSSL's one-shot SHA-256; the 33-byte pubkey fits one block on the HW unit | small, free |
+| static `[lo,hi)` split per thread -> one atomic chunk cursor (~256 survivors per chunk) | an E-core thread is ~4x slower than a P-core one, so the fast threads no longer idle at the tail |
+| `NWAY` 4 -> 2 | equal rate, fewer partial batches |
+| **`--passfile`**: one enumeration pass, every survivor derived against every passphrase, HMAC key midstate reused, lanes packed with (mnemonic, passphrase) pairs | replaces one full re-run of the whole space per passphrase |
+| **GPU kernel: HMAC ipad/opad midstates** | the kernel called `sha512(joined, 192)` four times per round and each call re-compressed the 128-byte ipad/opad block from the initial state: 4 block compressions per round where 2 are needed. **9,813 -> 21,075 seeds/s at naddr=2 (2.15x)** |
+| GPU kernel takes the padded salt block as a buffer | passphrase sweeps on the GPU with no program rebuild; the salt *length* as a kernel argument was tried first and measured 35% slower, because the Apple compiler then stops specialising `sha512()` at its call sites |
+| `blmc --list-bin` feeds the GPU raw uint16 indices | no printf on the C side, no text parsing in Python |
+| the kernel recomputed the chain node's pubkey once per address, exactly as `check_seed` did on the CPU | 5 EC mults/seed -> 4: **+1.9% at naddr=2, +36% at naddr=20** (10,742 -> 14,613 seeds/s) |
+| `BLM_GPU_SHARE` default 0.15 -> 0.46, and every run prints the share that would have balanced the two engines | on this machine the two engines are near-equal; 0.15 left most of the GPU idle, and 0.58 made the GPU gate the run (53 s vs 47 s) |
+
+Share/thread sweep on the full frame, seeds/s: 0.42+8t 39,014 | 0.42+7t 35,890 | **0.46+8t
+42,101** | 0.46+7t 39,431 | 0.48+8t 40,969. Holding a core back for the feeder does not pay:
+threads must stay at the core count. Before the midstate fix the same sweep peaked at 37,244.
+
+### Three GPU hypotheses, all falsified by measurement
+With the kernel at 21,528 seeds/s and 89% of that PBKDF2, the obvious next suspect was occupancy:
+the Apple GPU spills private memory past its register budget, and the kernel asks for a lot of it.
+Three independent reductions were tried and **none moved the number**:
+
+| change | private memory | naddr=2 |
+|---|---|---|
+| baseline | `W[80]` = 640 B | 21,528 |
+| 16-word rolling message schedule, looped `(j+1)&15` | 128 B | 15,789 (**25% worse** — the modular indexing defeats the compiler) |
+| the same, fully unrolled | 128 B | 21,014 (no gain) |
+| `tmp[512]`->`[256]`, `mnemonic[256]`->`[224]` | -288 B | 21,553 (no gain) |
+| workgroup 16 / 32 / 64 / 128 / 256 | — | 21,042 / 21,051 / 21,158 / 19,476 / 19,470 |
+
+So the kernel is arithmetic-bound, not occupancy-bound, and all three changes were reverted.
+`rotr64` already compiles to OpenCL's `rotate()` builtin. At 88 M block compressions/s the GPU is
+~26% of the M3's theoretical integer peak, and closing that would mean hand-splitting SHA-512 into
+32-bit halves rather than relying on the compiler's 64-bit emulation — a large rewrite of the
+round function with real correctness risk, for an uncertain 10-20% on the GPU half.
+
+**Both engines are now at their practical limits for this algorithm.** What is left is not engine
+work: `--naddr 1` would save ~4-5% at the cost of halving address coverage, `--part b..c/n` scales
+linearly across machines, and FINDINGS.md's own conclusion still holds — the bottleneck is word
+selection, not compute.
+
+### Correctness
+`c/test_blmc.py` still prints ALL PASS on both the O2 and the ASan+UBSan build, and gained:
+* `--selftest` now runs **four different passphrases in the four interleaved lanes**, rotated so
+  every salt visits every lane, against OpenSSL — a single shared salt would pass every older
+  check while being wrong for a sweep;
+* a planted hit at a **non-first passphrase** (3 list positions x 1 and 8 threads), asserting the
+  reported passphrase;
+* `seeds == survivors x passphrases`, and that blank lines in a passfile are skipped (so a
+  trailing newline cannot silently add an empty-passphrase pass).
+
+New `gpu/test_cgpu.py`: kernel selftest, a hit found **with** a passphrase and missed without it,
+a sweep hit found by the GPU and tagged, derivations == survivors x passphrases across both
+engines, and an injected GPU fault falling back to the CPU with the hit still found.
+
+### Ops fixes found on the way
+* `run.sh` and `stop.sh` both `cd`'d to `/Users/aom/Desktop/Workspace/claude/blm-btc/solver`,
+  which does not exist on this machine — every documented launch was dead. Both now derive the
+  directory from their own path. `stop.sh --orphans` also matches `blmc`, not only Python.
+* `gpu/gpu.py` defaulted `KERNEL_DIR` to a scratchpad path from an old session on another machine,
+  so the GPU path could not build at all. The 11 base kernels are now vendored in `gpu/cl/`.
+* `blmc`'s completion check polled every 2 s, so its reported wall time rounded up to the next
+  2 s boundary. Harmless for an 80 s run; for the old per-passphrase sweep it was up to 2 s of
+  dead time *per passphrase*. Now 250 ms, with the progress line still printed every ~2 s.
+
+---
+
 ## C engine (`solver/c/blmc`) — same 47-pool frame, four runs, 0 hits (2026-09-26)
 The Python/OpenCL hybrid was replaced by a C engine for the CPU side. Every run below is
 the same 21-word frame (`t21d.txt`: 16 fixed pairs, 5 free slots over the 47-word pool,

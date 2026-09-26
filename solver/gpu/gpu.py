@@ -17,10 +17,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import blm
 
-KERNEL_DIR = os.environ.get(
-    "BLM_CL_DIR",
-    "/private/tmp/claude-502/-Users-aom-Desktop-Workspace-claude-blm-btc/"
-    "6babdf71-7307-4270-8a0a-3ea3b7ff525b/scratchpad/bip39-solver-gpu/cl")
+# The 11 base kernels are vendored in gpu/cl/ (from johncantrell97/bip39-solver-gpu) so a clone of
+# this repo builds with no external checkout. BLM_CL_DIR overrides for experiments.
+KERNEL_DIR = os.environ.get("BLM_CL_DIR", os.path.join(HERE, "cl"))
 BASE = ["common", "ripemd", "sha2", "mnemonic_constants", "secp256k1_common",
         "secp256k1_scalar", "secp256k1_field", "secp256k1_group", "secp256k1_prec",
         "secp256k1", "address"]
@@ -50,25 +49,57 @@ class GPU:
     LOCAL = 32        # Apple SIMD-group width; smaller work-groups get the kernel killed
     MAX_BATCH = 4096  # ~1.4 s per launch at 20 addrs; the driver kills launches near ~3 s
 
-    def __init__(self, n_addr=20, verbose=True, mode="narrow"):
+    MAX_PASS = 99      # kernel `joined` budget: 8 + len + 4 <= 111 so the salt is one or two blocks
+
+    @staticmethod
+    def _salt_block(passphrase: str) -> np.ndarray:
+        """PBKDF2 salt "mnemonic"||passphrase||INT(1) as ONE padded SHA-512 block, 16 big-endian
+        words. The kernel compresses it onto the ipad midstate, so the message being padded for is
+        128 (ipad) + len(salt) bytes. Fixed 16 words means no kernel constant and no rebuild when
+        the passphrase changes - a sweep switches passphrase by swapping this buffer."""
+        b = passphrase.encode()
+        if len(b) > GPU.MAX_PASS:
+            raise ValueError(f"passphrase {len(b)} B > {GPU.MAX_PASS} B: too long for the GPU kernel")
+        msg = b"mnemonic" + b + b"\x00\x00\x00\x01"
+        buf = bytearray(128)
+        buf[:len(msg)] = msg
+        buf[len(msg)] = 0x80
+        buf[-8:] = ((128 + len(msg)) * 8).to_bytes(8, "big")
+        return np.array([int.from_bytes(buf[8*i:8*i+8], "big") for i in range(16)], dtype=np.uint64)
+
+    def set_passphrase(self, passphrase: str):
+        """Swap the salt buffer. Also drops the canaries: they are CPU-derived with the passphrase
+        in force, and a stale one would make every launch look driver-killed."""
+        if passphrase == self.passphrase:
+            return
+        self.passphrase = passphrase
+        self.sbuf = cl.Buffer(self.ctx, cl.mem_flags.READ_ONLY | cl.mem_flags.COPY_HOST_PTR,
+                              hostbuf=self._salt_block(passphrase))
+        self._canaries = {}
+
+    def __init__(self, n_addr=20, verbose=True, mode="narrow", passphrase=""):
         self.ctx = cl.Context(dev_type=cl.device_type.GPU)
         self.dev = self.ctx.devices[0]
         self.q = cl.CommandQueue(self.ctx)
+        self.n_addr = n_addr
+        self.mode = mode
         src = "\n".join(open(os.path.join(KERNEL_DIR, f + ".cl")).read() for f in BASE)
         src += "\n" + open(os.path.join(HERE, "blm.cl")).read()
         t = time.time()
         self.prg = cl.Program(self.ctx, src).build(options=[])
+        dt = time.time() - t
+        self.kern = self.prg.blm_check if mode == "narrow" else self.prg.blm_check_wide
+        self.passphrase = None
+        self._canaries = {}
+        self.set_passphrase(passphrase)
         if verbose:
-            print(f"[gpu] {self.dev.name}: kernels built in {time.time()-t:.1f}s, mode={mode}, "
-                  f"{'m/44h/0h/0h/0/0..%d'%(n_addr-1) if mode=='narrow' else '101 wide paths'}, wg {self.LOCAL}")
-        self.n_addr = n_addr
-        self.mode = mode
+            print(f"[gpu] {self.dev.name}: kernels built in {dt:.1f}s, mode={mode}, "
+                  f"{'m/44h/0h/0h/0/0..%d'%(n_addr-1) if mode=='narrow' else '101 wide paths'}, wg {self.LOCAL}"
+                  + (f", passphrase {passphrase!r}" if passphrase else ""))
         self.batch = self.MAX_BATCH if mode == "narrow" else 1024   # wide does ~5x the EC work per seed
         self.kills = 0
-        self.kern = self.prg.blm_check if mode == "narrow" else self.prg.blm_check_wide
         self.paths = ([f"m/44h/0h/0h/0/{i}" for i in range(n_addr)] if mode == "narrow" else WIDE_PATHS)
         self.set_target(blm.TARGET_H160)
-        self._canaries = {}
 
     def set_target(self, h160: bytes):
         self.target = np.frombuffer(h160, dtype=np.uint8)
@@ -80,7 +111,7 @@ class GPU:
         if nw not in self._canaries:
             ws = ["zoo"] * nw          # distinct from every control mnemonic; index 2047 edge-tests the word table
             idx = min(3, self.n_addr - 1)
-            node = blm.derive(blm.master_from_seed(blm.mnemonic_to_seed(" ".join(ws))),
+            node = blm.derive(blm.master_from_seed(blm.mnemonic_to_seed(" ".join(ws), self.passphrase)),
                               (44 | blm.HARD, 0 | blm.HARD, 0 | blm.HARD, 0, idx))
             h = blm.h160s(node)[0]
             self._canaries[nw] = {
@@ -121,7 +152,7 @@ class GPU:
         res = np.zeros(len(work), dtype=np.uint32)
         obuf = cl.Buffer(self.ctx, cl.mem_flags.WRITE_ONLY, res.nbytes)
         self.kern(self.q, (len(work),), (self.LOCAL,), ibuf, np.uint32(nw),
-                  np.uint32(self.n_addr), self.tbuf, c["buf"], obuf)
+                  np.uint32(self.n_addr), self.tbuf, c["buf"], self.sbuf, obuf)
         cl.enqueue_copy(self.q, res, obuf)
         self.q.finish()
         expect = CANARY_FLAG | (c["idx"] + 1)

@@ -102,22 +102,30 @@ static void sha512_msg(const uint8_t *d, size_t n, uint8_t out[64]) {
 
 typedef struct { uint64_t in[8], out[8]; } hmac_mid;
 
-/* PBKDF2 salt = "mnemonic" || passphrase. The first HMAC message (salt || INT(1)) does not
- * depend on the mnemonic, so its padded SHA-512 block(s) are built once here. */
-static uint8_t PB_BLK[2][128]; static int PB_NBLK = 0;
-static void pbkdf2_set_passphrase(const char *pass) {
+/* PBKDF2 salt = "mnemonic" || passphrase. The first HMAC message (salt || INT(1)) does not depend
+ * on the mnemonic, so its padded SHA-512 block(s) are built once, per passphrase, into a pb_salt.
+ * A sweep holds one pb_salt per candidate passphrase and hands a *different* one to each
+ * interleaved lane, so the salt can never be a shared mutable global in the hot loop. */
+typedef struct { uint8_t blk[2][128]; int nblk; } pb_salt;
+
+static void pb_salt_init(pb_salt *s, const char *pass) {
     uint8_t msg[256]; size_t n = 0;
     memcpy(msg, "mnemonic", 8); n = 8;
     size_t pl = pass ? strlen(pass) : 0;
     if (pl > 200) { fprintf(stderr, "passphrase too long (max 200 bytes)\n"); exit(2); }
     memcpy(msg + n, pass ? pass : "", pl); n += pl;
     msg[n++] = 0; msg[n++] = 0; msg[n++] = 0; msg[n++] = 1;          /* INT(1) */
-    memset(PB_BLK, 0, sizeof PB_BLK);
+    memset(s->blk, 0, sizeof s->blk);
     uint64_t bits = (uint64_t)(128 + n) * 8;
-    if (n <= 111) { memcpy(PB_BLK[0], msg, n); PB_BLK[0][n] = 0x80; put_be64(PB_BLK[0] + 120, bits); PB_NBLK = 1; }
-    else { memcpy(PB_BLK[0], msg, 128); if (n > 128) memcpy(PB_BLK[1], msg + 128, n - 128); PB_BLK[1][n - 128] = 0x80;
-           put_be64(PB_BLK[1] + 120, bits); PB_NBLK = 2; }
+    if (n <= 111) { memcpy(s->blk[0], msg, n); s->blk[0][n] = 0x80; put_be64(s->blk[0] + 120, bits); s->nblk = 1; }
+    else { memcpy(s->blk[0], msg, 128); if (n > 128) memcpy(s->blk[1], msg + 128, n - 128); s->blk[1][n - 128] = 0x80;
+           put_be64(s->blk[1] + 120, bits); s->nblk = 2; }
 }
+
+/* The default salt used when no per-lane salt is supplied. Written once by
+ * pbkdf2_set_passphrase() before any worker thread starts, and read-only thereafter. */
+static pb_salt PB_DEFAULT;
+static void pbkdf2_set_passphrase(const char *pass) { pb_salt_init(&PB_DEFAULT, pass); }
 
 /* HMAC-SHA512 midstates for key = mnemonic (pre-hashed if > 128 bytes, per RFC 2104) */
 static void hmac_mid_init(hmac_mid *m, const uint8_t *key, size_t klen) {
@@ -152,8 +160,8 @@ static void __attribute__((unused)) pbkdf2_bip39(const uint8_t *mn, size_t mlen,
     hmac_mid m; hmac_mid_init(&m, mn, mlen);
     uint64_t st[8]; uint8_t blk[128];
     /* U1 = HMAC(mn, salt || 0x00000001) with the precomputed salt block(s) */
-    if (!PB_NBLK) pbkdf2_set_passphrase("");
-    memcpy(st, m.in, 64); sha512_compress(st, PB_BLK[0]); if (PB_NBLK == 2) sha512_compress(st, PB_BLK[1]);
+    const pb_salt *S = &PB_DEFAULT;
+    memcpy(st, m.in, 64); sha512_compress(st, S->blk[0]); if (S->nblk == 2) sha512_compress(st, S->blk[1]);
     st_to_bytes(st, blk); pad64_block(blk);
     memcpy(st, m.out, 64); sha512_compress(st, blk);
     uint64_t T[8]; memcpy(T, st, 64);
@@ -170,18 +178,19 @@ static void __attribute__((unused)) pbkdf2_bip39(const uint8_t *mn, size_t mlen,
 /* ---- N-way PBKDF2 (N = 1,2,4): seeds[j] = PBKDF2-HMAC-SHA512(mn[j], "mnemonic", 2048, 64) ---- */
 #if SHA512_HW
 #include "sha512_nway.h"
+/* Core: N lanes, each with its own HMAC key midstate AND its own salt. A passphrase sweep reuses
+ * one midstate per mnemonic across every candidate passphrase and varies only the salt; a plain
+ * search passes the same salt in every lane. U1 is done lane by lane because lanes may disagree
+ * on whether the salt needs one block or two - that is 1-2 blocks out of 4096, under 0.05%. */
 #define PBKDF2_NWAY(N)                                                                             \
-static void pbkdf2_bip39_x##N(const uint8_t *const *mn, const size_t *mlen, uint8_t (*seed)[64]) { \
-    hmac_mid m[N]; uint64_t st[N][8], T[N][8]; uint8_t blk[N][128];                                \
+static void pbkdf2_mid_x##N(const hmac_mid *m, const pb_salt *const *sa, uint8_t (*seed)[64]) {    \
+    uint64_t st[N][8], T[N][8]; uint8_t blk[N][128];                                               \
     for (int j = 0; j < N; j++) {                                                                  \
-        hmac_mid_init(&m[j], mn[j], mlen[j]);                                                      \
-        if (!PB_NBLK) pbkdf2_set_passphrase("");                                                   \
-        memcpy(blk[j], PB_BLK[0], 128); memcpy(st[j], m[j].in, 64);                                \
+        uint64_t u[8]; memcpy(u, m[j].in, 64);                                                     \
+        sha512_compress(u, sa[j]->blk[0]);                                                         \
+        if (sa[j]->nblk == 2) sha512_compress(u, sa[j]->blk[1]);                                   \
+        st_to_bytes(u, blk[j]); pad64_block(blk[j]); memcpy(st[j], m[j].out, 64);                  \
     }                                                                                              \
-    sha512_compress_x##N(st, (const uint8_t (*)[128])blk);                                         \
-    if (PB_NBLK == 2) { for (int j = 0; j < N; j++) memcpy(blk[j], PB_BLK[1], 128);                \
-                        sha512_compress_x##N(st, (const uint8_t (*)[128])blk); }                   \
-    for (int j = 0; j < N; j++) { st_to_bytes(st[j], blk[j]); pad64_block(blk[j]); memcpy(st[j], m[j].out, 64); } \
     sha512_compress_x##N(st, (const uint8_t (*)[128])blk);                                         \
     memcpy(T, st, sizeof T);                                                                       \
     for (int r = 1; r < 2048; r++) {                                                               \
@@ -192,13 +201,38 @@ static void pbkdf2_bip39_x##N(const uint8_t *const *mn, const size_t *mlen, uint
         for (int j = 0; j < N; j++) for (int i = 0; i < 8; i++) T[j][i] ^= st[j][i];               \
     }                                                                                              \
     for (int j = 0; j < N; j++) st_to_bytes(T[j], seed[j]);                                        \
+}                                                                                                  \
+static void pbkdf2_bip39_x##N(const uint8_t *const *mn, const size_t *mlen, uint8_t (*seed)[64]) { \
+    hmac_mid m[N]; const pb_salt *sa[N];                                                           \
+    for (int j = 0; j < N; j++) { hmac_mid_init(&m[j], mn[j], mlen[j]); sa[j] = &PB_DEFAULT; }     \
+    pbkdf2_mid_x##N(m, sa, seed);                                                                  \
 }
 PBKDF2_NWAY(1) PBKDF2_NWAY(2) PBKDF2_NWAY(4)
 #else
 /* portable fallback (no SHA-512 instructions): same interface, one stream at a time */
 #define PBKDF2_NWAY_SEQ(N)                                                                         \
+static void pbkdf2_mid_x##N(const hmac_mid *m, const pb_salt *const *sa, uint8_t (*seed)[64]) {    \
+    for (int j = 0; j < N; j++) {                                                                  \
+        uint64_t st[8], T[8]; uint8_t blk[128];                                                    \
+        memcpy(st, m[j].in, 64); sha512_compress(st, sa[j]->blk[0]);                               \
+        if (sa[j]->nblk == 2) sha512_compress(st, sa[j]->blk[1]);                                  \
+        st_to_bytes(st, blk); pad64_block(blk);                                                    \
+        memcpy(st, m[j].out, 64); sha512_compress(st, blk);                                        \
+        memcpy(T, st, 64);                                                                         \
+        for (int r = 1; r < 2048; r++) {                                                           \
+            st_to_bytes(st, blk); pad64_block(blk);                                                \
+            memcpy(st, m[j].in, 64); sha512_compress(st, blk);                                     \
+            st_to_bytes(st, blk); pad64_block(blk);                                                \
+            memcpy(st, m[j].out, 64); sha512_compress(st, blk);                                    \
+            for (int i = 0; i < 8; i++) T[i] ^= st[i];                                             \
+        }                                                                                          \
+        st_to_bytes(T, seed[j]);                                                                   \
+    }                                                                                              \
+}                                                                                                  \
 static void pbkdf2_bip39_x##N(const uint8_t *const *mn, const size_t *mlen, uint8_t (*seed)[64]) { \
-    for (int j = 0; j < N; j++) pbkdf2_bip39(mn[j], mlen[j], seed[j]);                             \
+    hmac_mid m[N]; const pb_salt *sa[N];                                                           \
+    for (int j = 0; j < N; j++) { hmac_mid_init(&m[j], mn[j], mlen[j]); sa[j] = &PB_DEFAULT; }     \
+    pbkdf2_mid_x##N(m, sa, seed);                                                                  \
 }
 PBKDF2_NWAY_SEQ(1) PBKDF2_NWAY_SEQ(2) PBKDF2_NWAY_SEQ(4)
 #endif

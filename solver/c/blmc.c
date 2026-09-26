@@ -10,11 +10,16 @@
  *   blmc --template FILE [--target HEX] [--naddr K] [--threads N]   search
  *   blmc --derive [--naddr K]        stdin: mnemonics; stdout: seed, master, hash160s
  *   blmc --template FILE --list      print every checksum-valid mnemonic (small spaces)
+ *   blmc --template FILE --list-bin  the same as raw uint16 word indices, NW per survivor, to
+ *                                    stdout - what cgpu.py feeds the GPU (no text round-trip)
  *   blmc --template FILE --count     print total and checksum-valid counts
  *   --passphrase STR                 BIP39 passphrase (salt = "mnemonic" || STR); default empty
+ *   --passfile FILE                  sweep one passphrase per line against every survivor, in a
+ *                                    SINGLE enumeration pass (vs one full re-run per passphrase)
  *   --part b/n | --part b..c/n       work only on parts b (to c) of the combo space split into n
  *                                    equal parts (cgpu.py gives the GPU some parts, the CPU the rest)
  *   blmc --selftest                  SHA-512 / PBKDF2 fast paths vs OpenSSL
+ *   blmc --bench [--template T]      per-component cost on one core (PBKDF2 x1/x2/x4, EC, enumerator)
  *
  * Template syntax (same as solve.py): word | ? | {a|b|c}
  *
@@ -22,6 +27,7 @@
  * (test_blmc.py) on seed, master key, chain code, and every address.
  */
 #include <stdio.h>
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -87,7 +93,9 @@ static void hex(const uint8_t *b, int n, char *out) {
 
 /* --------------------------------------------------------------- crypto */
 static void hash160(const uint8_t *d, size_t n, uint8_t out[20]) {
-    uint8_t s[32]; SHA256(d, n, s); RIPEMD160(s, 32, out);      /* legacy one-shots: no provider fetch */
+    uint8_t s[32];
+    if (n <= 55) sha256_short(d, n, s); else SHA256(d, n, s);   /* 33-byte pubkey: HW SHA-256 unit */
+    RIPEMD160(s, 32, out);                                       /* legacy one-shot: no provider fetch */
 }
 static void hmac512(const uint8_t *key, size_t klen, const uint8_t *d, size_t n, uint8_t out[64]) {
     if (klen > 128 || n > 111) die("hmac512: unsupported size");
@@ -99,11 +107,16 @@ static void bip39_seed(const char *mnemonic, size_t mlen, uint8_t seed[64]) {
     const uint8_t *m = (const uint8_t *)mnemonic; uint8_t (*sd)[64] = (uint8_t (*)[64])seed;
     pbkdf2_bip39_x1(&m, &mlen, sd);
 }
-#define NWAY 4
-/* NWAY mnemonics at once, rounds interleaved: ~1.7x the single-stream rate on M1 */
-static void bip39_seed_x4(const uint8_t *const mn[NWAY], const size_t mlen[NWAY], uint8_t seed[NWAY][64]) {
-    pbkdf2_bip39_x4(mn, mlen, seed);
-}
+/* Interleave width. `--bench` on an M3 measures 43.5 ns/block at x2 and 44.1 at x4: the SHA-512
+ * unit saturates at two streams, so 2 is the default (same rate, half the register pressure and
+ * half the partial-batch waste). Override with -DNWAY=4 to re-measure on other silicon. */
+#ifndef NWAY
+#define NWAY 2
+#endif
+#define BLM_CAT_(a, b) a##b
+#define BLM_CAT(a, b) BLM_CAT_(a, b)
+#define pbkdf2_bip39_xN BLM_CAT(pbkdf2_bip39_x, NWAY)
+#define pbkdf2_mid_xN   BLM_CAT(pbkdf2_mid_x, NWAY)
 
 typedef struct { uint8_t k[32]; uint8_t c[32]; } xkey;
 
@@ -130,15 +143,22 @@ static int pubkey33(secp256k1_context *ctx, const uint8_t k[32], uint8_t out[33]
     secp256k1_ec_pubkey_serialize(ctx, out, &L, &pk, SECP256K1_EC_COMPRESSED);
     return 1;
 }
-static int ckd_normal(secp256k1_context *ctx, const xkey *p, uint32_t i, xkey *ch) {
+/* normal CKD from a parent whose serialized pubkey the caller already has. Every leaf under
+ * m/44'/0'/0'/0 shares one parent pubkey, so hoisting it out saves NADDR-1 EC mults per seed. */
+static int ckd_normal_pub(secp256k1_context *ctx, const xkey *p, const uint8_t ppub[33], uint32_t i, xkey *ch) {
     uint8_t data[37], I[64];
-    if (!pubkey33(ctx, p->k, data)) return 0;
+    memcpy(data, ppub, 33);
     data[33] = i >> 24; data[34] = i >> 16; data[35] = i >> 8; data[36] = i;
     hmac512(p->c, 32, data, 37, I);
     memcpy(ch->k, p->k, 32);
     if (!secp256k1_ec_seckey_tweak_add(ctx, ch->k, I)) return 0;
     memcpy(ch->c, I + 32, 32);
     return 1;
+}
+static int ckd_normal(secp256k1_context *ctx, const xkey *p, uint32_t i, xkey *ch) {
+    uint8_t ppub[33];
+    if (!pubkey33(ctx, p->k, ppub)) return 0;
+    return ckd_normal_pub(ctx, p, ppub, i, ch);
 }
 /* derive m/44'/0'/0'/0; returns 0 if any step invalid */
 static int account_chain(secp256k1_context *ctx, const uint8_t seed[64], xkey *out) {
@@ -238,6 +258,41 @@ static size_t build_mnemonic(const uint8_t *buf, char *out) {
     return L;
 }
 
+/* ------------------------------------------------------------ passphrases
+ * A sweep tests every checksum-valid mnemonic against every candidate passphrase. The passphrase
+ * is PBKDF2's salt, not its key, so nothing about the 2048 rounds can be shared between two
+ * passphrases - but the enumeration, the checksum and the HMAC key midstate of the mnemonic are
+ * computed once and reused across the whole list instead of once per passphrase per full re-run.
+ * The table is built before any thread starts and is read-only afterwards. */
+#define MAXPASS 100000
+static pb_salt *psalt = NULL;          /* one prepared salt per passphrase */
+static char   **pname = NULL;          /* the passphrase text, for hit reporting */
+static int      NPASS = 1;             /* 1 = the single --passphrase (default empty) */
+
+static void load_passfile(const char *path) {
+    FILE *f = fopen(path, "r"); if (!f) die("cannot open passphrase file");
+    size_t cap = 256; NPASS = 0;
+    psalt = malloc(cap * sizeof *psalt); pname = malloc(cap * sizeof *pname);
+    if (!psalt || !pname) die("out of memory");
+    char line[512];
+    while (fgets(line, sizeof line, f)) {
+        size_t L = strcspn(line, "\r\n"); line[L] = 0;
+        /* blank and whitespace-only lines are skipped: a trailing newline must not silently add
+         * an empty-passphrase pass. The no-passfile run already covers the empty passphrase. */
+        int blank = 1; for (size_t q = 0; q < L; q++) if (!isspace((unsigned char)line[q])) { blank = 0; break; }
+        if (blank) continue;
+        if (NPASS == MAXPASS) die("too many passphrases");
+        if ((size_t)NPASS == cap) { cap *= 2;
+            psalt = realloc(psalt, cap * sizeof *psalt); pname = realloc(pname, cap * sizeof *pname);
+            if (!psalt || !pname) die("out of memory"); }
+        pb_salt_init(&psalt[NPASS], line);
+        pname[NPASS] = strdup(line); if (!pname[NPASS]) die("out of memory");
+        NPASS++;
+    }
+    fclose(f);
+    if (!NPASS) die("passphrase file is empty");
+}
+
 /* ---------------------------------------------------------------- search */
 static uint8_t target[20];
 static int NADDR = 2;
@@ -246,77 +301,112 @@ static atomic_int stop_flag = 0, hits = 0;
 static pthread_mutex_t hit_mu = PTHREAD_MUTEX_INITIALIZER;
 static int list_mode = 0;
 
-typedef struct { uint64_t lo, hi; int id; } job;
+/* Work is handed out in chunks from one atomic cursor instead of split statically: on a 4P+4E
+ * Apple part an E-core thread is ~4x slower than a P-core one, so an equal split leaves the fast
+ * threads idle at the tail. Chunks are sized for ~256 checksum-valid seeds each. */
+static atomic_ullong next_chunk = 0;
+static uint64_t CHUNK = 1 << 16, G_LO = 0, G_HI = 0;
 
-static void report_hit(const char *mn, int i) {
+static void report_hit(const char *mn, int i, const char *pw) {
+    char tail[600] = "";
+    if (pw && *pw) snprintf(tail, sizeof tail, " passphrase='%s'", pw);
     pthread_mutex_lock(&hit_mu);
-    printf("\n*** HIT *** '%s' path=m/44h/0h/0h/0/%d [blmc]\n", mn, i); fflush(stdout);
-    FILE *f = fopen("HIT.txt", "a");
-    if (f) { fprintf(f, "*** HIT *** '%s' path=m/44h/0h/0h/0/%d [blmc]\n", mn, i); fclose(f); }
+    printf("\n*** HIT *** '%s' path=m/44h/0h/0h/0/%d%s [blmc]\n", mn, i, tail); fflush(stdout);
+    const char *hf = getenv("BLM_HIT_FILE");            /* tests redirect; default is cwd/HIT.txt */
+    FILE *f = fopen(hf && *hf ? hf : "HIT.txt", "a");
+    if (f) { fprintf(f, "*** HIT *** '%s' path=m/44h/0h/0h/0/%d%s [blmc]\n", mn, i, tail); fclose(f); }
     atomic_fetch_add(&hits, 1);
     atomic_store(&stop_flag, 1);
     pthread_mutex_unlock(&hit_mu);
 }
 
 /* derive m/44'/0'/0'/0/i for i < NADDR from one seed and compare with the target */
-static void check_seed(secp256k1_context *ctx, const uint8_t seed[64], const char *mn) {
-    xkey chain; uint8_t pub[33], h[20];
+static void check_seed(secp256k1_context *ctx, const uint8_t seed[64], const char *mn, const char *pw) {
+    xkey chain; uint8_t cpub[33], pub[33], h[20];
     if (!account_chain(ctx, seed, &chain)) return;
+    if (!pubkey33(ctx, chain.k, cpub)) return;        /* once; every leaf reuses it */
     for (int i = 0; i < NADDR; i++) {
         xkey leaf;
-        if (!ckd_normal(ctx, &chain, (uint32_t)i, &leaf)) continue;
+        if (!ckd_normal_pub(ctx, &chain, cpub, (uint32_t)i, &leaf)) continue;
         if (!pubkey33(ctx, leaf.k, pub)) continue;
         hash160(pub, 33, h);
-        if (memcmp(h, target, 20) == 0) { report_hit(mn, i); return; }
+        if (memcmp(h, target, 20) == 0) { report_hit(mn, i, pw); return; }
     }
 }
 
-typedef struct { char mn[NWAY][MAXLINE]; size_t len[NWAY]; int n; } wbatch;
+/* One lane = one (mnemonic, passphrase) pair. With no --passfile there is a single passphrase and
+ * this degenerates to the old "NWAY mnemonics" batch. */
+typedef struct {
+    char     mn[NWAY][MAXLINE];
+    hmac_mid mid[NWAY];                     /* HMAC key midstate: one per mnemonic, reused across passphrases */
+    int      pw[NWAY];                      /* index into psalt/pname */
+    int      n;
+} wbatch;
 
-/* run PBKDF2 on the buffered mnemonics (NWAY interleaved when full) and check each */
+/* run PBKDF2 on the buffered pairs (NWAY interleaved when full) and check each */
 static void flush_batch(secp256k1_context *ctx, wbatch *b) {
     uint8_t seed[NWAY][64];
-    if (b->n == NWAY) {
-        const uint8_t *mn[NWAY]; for (int j = 0; j < NWAY; j++) mn[j] = (const uint8_t *)b->mn[j];
-        bip39_seed_x4(mn, b->len, seed);
-    } else {
-        for (int j = 0; j < b->n; j++) bip39_seed(b->mn[j], b->len[j], seed[j]);
-    }
-    for (int j = 0; j < b->n; j++) check_seed(ctx, seed[j], b->mn[j]);
+    const pb_salt *sa[NWAY];
+    for (int j = 0; j < b->n; j++) sa[j] = psalt ? &psalt[b->pw[j]] : &PB_DEFAULT;
+    if (b->n == NWAY) pbkdf2_mid_xN(b->mid, sa, seed);
+    else for (int j = 0; j < b->n; j++) pbkdf2_mid_x1(&b->mid[j], &sa[j], &seed[j]);
+    for (int j = 0; j < b->n; j++) check_seed(ctx, seed[j], b->mn[j], pname ? pname[b->pw[j]] : NULL);
     atomic_fetch_add(&seeds_done, (uint64_t)b->n);
     b->n = 0;
 }
 
 static void *worker(void *arg) {
-    job *J = arg;
+    (void)arg;
     secp256k1_context *ctx = secp256k1_context_create(SECP256K1_CONTEXT_NONE);
-    int digit[MAXW]; uint64_t rem = J->lo;
-    /* mixed-radix decode of lo: least-significant digit = last free slot */
-    for (int j = NFREE - 1; j >= 0; j--) { int n = slots[freeslot[j]].n; digit[j] = (int)(rem % n); rem /= n; }
+    int digit[MAXW];
     uint8_t buf[33]; char mn[MAXLINE];
     wbatch B; B.n = 0;
-    uint64_t local = 0;
-    memcpy(buf, fixedbuf, 33);
-    for (int j = 0; j < NFREE; j++) put11(buf, 11 * freeslot[j], slots[freeslot[j]].idx[digit[j]]);
-    for (uint64_t c = J->lo; c < J->hi; c++) {
-        if (checksum_ok(buf)) {
-            if (list_mode == 1) { build_mnemonic(buf, mn); pthread_mutex_lock(&hit_mu); puts(mn); pthread_mutex_unlock(&hit_mu); atomic_fetch_add(&seeds_done, 1); }
-            else if (list_mode == 2) { atomic_fetch_add(&seeds_done, 1); }
-            else {
-                B.len[B.n] = build_mnemonic(buf, B.mn[B.n]);
-                if (++B.n == NWAY) flush_batch(ctx, &B);
+    uint64_t local = 0, valid = 0;
+    for (;;) {
+        uint64_t off = atomic_fetch_add(&next_chunk, CHUNK);
+        if (off >= G_HI - G_LO || atomic_load(&stop_flag)) break;
+        uint64_t c = G_LO + off, end = c + CHUNK; if (end > G_HI) end = G_HI;
+        /* mixed-radix decode of the chunk start: least-significant digit = last free slot */
+        uint64_t rem = c;
+        for (int j = NFREE - 1; j >= 0; j--) { int n = slots[freeslot[j]].n; digit[j] = (int)(rem % n); rem /= n; }
+        memcpy(buf, fixedbuf, 33);
+        for (int j = 0; j < NFREE; j++) put11(buf, 11 * freeslot[j], slots[freeslot[j]].idx[digit[j]]);
+        for (; c < end; c++) {
+            if (checksum_ok(buf)) {
+                if (list_mode == 1) { build_mnemonic(buf, mn); pthread_mutex_lock(&hit_mu); puts(mn); pthread_mutex_unlock(&hit_mu); valid++; }
+                else if (list_mode == 2) valid++;
+                else if (list_mode == 3) {       /* raw uint16 indices: no formatting, no parsing */
+                    uint16_t w[MAXW];
+                    for (int i = 0; i < NW; i++) {
+                        int bp = 11 * i, by = bp >> 3, sh = bp & 7;
+                        w[i] = (uint16_t)((((uint32_t)buf[by] << 16 | (uint32_t)buf[by+1] << 8 | buf[by+2])
+                                           >> (24 - 11 - sh)) & 2047);
+                    }
+                    fwrite(w, sizeof(uint16_t), (size_t)NW, stdout); valid++;
+                }
+                else {
+                    char mnb[MAXLINE]; size_t L = build_mnemonic(buf, mnb);
+                    hmac_mid mid; hmac_mid_init(&mid, (const uint8_t *)mnb, L);   /* once per mnemonic */
+                    for (int q = 0; q < NPASS; q++) {
+                        memcpy(B.mn[B.n], mnb, L + 1); B.mid[B.n] = mid; B.pw[B.n] = q;
+                        if (++B.n == NWAY) flush_batch(ctx, &B);
+                    }
+                }
             }
+            /* odometer increment; only the slots whose digit changed are re-packed */
+            for (int j = NFREE - 1; j >= 0; j--) {
+                int pos = 11 * freeslot[j]; clr11(buf, pos);
+                if (++digit[j] < slots[freeslot[j]].n) { put11(buf, pos, slots[freeslot[j]].idx[digit[j]]); break; }
+                digit[j] = 0; put11(buf, pos, slots[freeslot[j]].idx[0]);
+            }
+            if (++local == 4096) { atomic_fetch_add(&combos_done, local); local = 0;
+                                   if (valid) { atomic_fetch_add(&seeds_done, valid); valid = 0; }
+                                   if (atomic_load(&stop_flag)) break; }
         }
-        /* odometer increment; only the slots whose digit changed are re-packed */
-        for (int j = NFREE - 1; j >= 0; j--) {
-            int pos = 11 * freeslot[j]; clr11(buf, pos);
-            if (++digit[j] < slots[freeslot[j]].n) { put11(buf, pos, slots[freeslot[j]].idx[digit[j]]); break; }
-            digit[j] = 0; put11(buf, pos, slots[freeslot[j]].idx[0]);
-        }
-        if (++local == 4096) { atomic_fetch_add(&combos_done, local); local = 0; if (atomic_load(&stop_flag)) break; }
     }
     if (B.n) flush_batch(ctx, &B);
     atomic_fetch_add(&combos_done, local);
+    if (valid) atomic_fetch_add(&seeds_done, valid);
     secp256k1_context_destroy(ctx);
     return NULL;
 }
@@ -359,6 +449,31 @@ static int selftest(void) {
       }
       pbkdf2_set_passphrase("");
       printf("pbkdf2 with passphrase salts (short, >111-byte, spaces) vs OpenSSL: %s\n", bad ? "MISMATCH" : "ok"); }
+    /* per-lane salts: four DIFFERENT passphrases in the four interleaved lanes at once. A sweep
+     * packs lanes this way, and a single global salt would pass every test above while being
+     * wrong here, so this is the check that actually covers --passfile. */
+    { const char *P4[4] = {"", "TUESDAY",
+                           "a passphrase long enough that the salt needs a second SHA-512 block, which is more than one hundred and eleven bytes all told",
+                           "I can't BREATHE"};
+      const char *K4[4] = {"a b c", "legal winner thank year wave sausage worth useful legal winner thank yellow",
+                           "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo vote", "x"};
+      pb_salt S[4]; const pb_salt *sp[4]; hmac_mid M[4]; uint8_t ref[4][64], out[4][64];
+      for (int rot = 0; rot < 4 && !bad; rot++) {          /* rotate so every salt visits every lane */
+          for (int j = 0; j < 4; j++) {
+              const char *pw = P4[(j + rot) & 3]; char salt[300];
+              snprintf(salt, sizeof salt, "mnemonic%s", pw);
+              pb_salt_init(&S[j], pw); sp[j] = &S[j];
+              hmac_mid_init(&M[j], (const uint8_t *)K4[j], strlen(K4[j]));
+              if (!PKCS5_PBKDF2_HMAC(K4[j], (int)strlen(K4[j]), (const uint8_t *)salt, (int)strlen(salt),
+                                     2048, EVP_sha512(), 64, ref[j])) return 1;
+          }
+          memset(out, 0, sizeof out); pbkdf2_mid_x4(M, sp, out);          bad += memcmp(out, ref, sizeof out) != 0;
+          memset(out, 0, sizeof out); pbkdf2_mid_x2(M, sp, out); pbkdf2_mid_x2(M + 2, sp + 2, out + 2);
+                                                                          bad += memcmp(out, ref, sizeof out) != 0;
+          memset(out, 0, sizeof out); for (int j = 0; j < 4; j++) pbkdf2_mid_x1(M + j, sp + j, out + j);
+                                                                          bad += memcmp(out, ref, sizeof out) != 0;
+      }
+      printf("pbkdf2 with a DIFFERENT passphrase per lane (x1/x2/x4, 4 rotations) vs OpenSSL: %s\n", bad ? "MISMATCH" : "ok"); }
     for (int n = 0; n <= 55 && !bad; n++) for (int t = 0; t < 50; t++) {
         uint8_t d[64], a[32], b[32]; for (int i = 0; i < n; i++) d[i] = (uint8_t)rand();
         sha256_short(d, (size_t)n, a); SHA256(d, (size_t)n, b); bad += memcmp(a, b, 32) != 0;
@@ -374,6 +489,99 @@ static int selftest(void) {
     return bad ? 1 : 0;
 }
 
+/* --------------------------------------------------------------- bench
+ * Per-component cost on ONE core, so an optimisation can be attributed instead of guessed.
+ * Prints ns per SHA-512 block for each interleave width (the gate for going wider), us per
+ * seed for the EC half, and combos/s for the enumerator. */
+static double now_s(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec / 1e9; }
+
+static void bench_mode(void) {
+    const int REPS = 60;                       /* 60 x 4 = 240 PBKDF2s per width, ~0.1 s each */
+    enum { BW = 4 };                           /* always 4 lanes here: x4 is benchmarked whatever NWAY is */
+    char buf[BW][MAXLINE]; const uint8_t *mn[BW]; size_t ml[BW]; uint8_t seed[BW][64];
+    for (int j = 0; j < BW; j++) {
+        size_t L = 0;
+        for (int i = 0; i < 21; i++) { int w = (i * 97 + j * 13) & 2047;
+            memcpy(buf[j] + L, wordlist[w], wordlen[w]); L += wordlen[w]; buf[j][L++] = ' '; }
+        buf[j][--L] = 0; mn[j] = (const uint8_t *)buf[j]; ml[j] = L;
+    }
+    printf("bench (1 core, 21-word mnemonics, %d blocks per PBKDF2; engine runs at x%d)\n", 4096, NWAY);
+#if SHA512_HW
+    /* raw compression with no PBKDF2 glue: the floor the SHA-512 unit imposes. If pbkdf2 xN is
+     * close to this, the byte-swapping/padding between rounds is free and not worth optimising. */
+    {   uint64_t rst[4][8]; uint8_t rblk[4][128]; static volatile uint64_t sink;
+        for (int j = 0; j < 4; j++) { memcpy(rst[j], H512_INIT, 64); memset(rblk[j], (uint8_t)(j + 1), 128); }
+        for (int w = 1; w <= 4; w <<= 1) {
+            const int RB = 200000; double t = now_s();
+            for (int r = 0; r < RB; r++) {
+                if (w == 1) { for (int j = 0; j < 4; j++) sha512_compress_x1(rst + j, (const uint8_t (*)[128])(rblk + j)); }
+                else if (w == 2) { sha512_compress_x2(rst, (const uint8_t (*)[128])rblk); sha512_compress_x2(rst + 2, (const uint8_t (*)[128])(rblk + 2)); }
+                else sha512_compress_x4(rst, (const uint8_t (*)[128])rblk);
+            }
+            double rt = now_s() - t;
+            for (int j = 0; j < 4; j++) sink ^= rst[j][0];        /* keep the loop alive */
+            printf("  raw    x%d : %6.1f ns/block  (no pbkdf2 glue)\n", w, rt / RB / 4 * 1e9);
+        }
+    }
+#endif
+    double t1 = 0, tN = 0;
+    for (int w = 1; w <= 4; w <<= 1) {
+        double t = now_s(); int n = 0;
+        for (int r = 0; r < REPS; r++) {
+            if (w == 1) { for (int j = 0; j < 4; j++) { pbkdf2_bip39_x1(mn + j, ml + j, seed + j); n++; } }
+            else if (w == 2) { pbkdf2_bip39_x2(mn, ml, seed); pbkdf2_bip39_x2(mn + 2, ml + 2, seed + 2); n += 4; }
+            else { pbkdf2_bip39_x4(mn, ml, seed); n += 4; }
+        }
+        double el = now_s() - t;
+        if (w == 1) t1 = el;
+        if (w == NWAY) tN = el;
+        printf("  pbkdf2 x%d : %8.1f seeds/s  %7.1f us/seed  %6.1f ns/block   %.2fx x1\n",
+               w, n / el, el / n * 1e6, el / n / 4096 * 1e9, t1 / el);
+    }
+    /* EC half: account_chain + NADDR leaves, exactly what check_seed does */
+    secp256k1_context *ctx = secp256k1_context_create(SECP256K1_CONTEXT_NONE);
+    uint8_t sd[64]; memcpy(sd, seed[0], 64);
+    int EREPS = 3000; double t = now_s(); int live = 0;
+    for (int r = 0; r < EREPS; r++) {
+        sd[0] = (uint8_t)r; sd[1] = (uint8_t)(r >> 8);
+        xkey chain; uint8_t cpub[33], pub[33], h[20];
+        if (!account_chain(ctx, sd, &chain) || !pubkey33(ctx, chain.k, cpub)) continue;
+        for (int i = 0; i < NADDR; i++) { xkey leaf;
+            if (!ckd_normal_pub(ctx, &chain, cpub, (uint32_t)i, &leaf)) continue;
+            if (!pubkey33(ctx, leaf.k, pub)) continue;
+            hash160(pub, 33, h); live += h[0]; }
+    }
+    double ec = (now_s() - t) / EREPS;
+    printf("  ec derive : %8.1f seeds/s  %7.1f us/seed  (naddr %d, %d pubkey mults)%s\n",
+           1 / ec, ec * 1e6, NADDR, NADDR + 2, live ? "" : "");
+    /* one pubkey mult alone */
+    t = now_s(); uint8_t pk[33];
+    for (int r = 0; r < EREPS; r++) { sd[2] = (uint8_t)r; sd[3] = (uint8_t)(r >> 8); pubkey33(ctx, sd, pk); }
+    printf("  pubkey33  : %7.2f us each\n", (now_s() - t) / EREPS * 1e6);
+    secp256k1_context_destroy(ctx);
+    /* enumerator: odometer + SHA-256 checksum, no derivation */
+    if (NW) {
+        uint8_t b[33]; int digit[MAXW]; memset(digit, 0, sizeof digit);
+        memcpy(b, fixedbuf, 33);
+        for (int j = 0; j < NFREE; j++) put11(b, 11 * freeslot[j], slots[freeslot[j]].idx[0]);
+        uint64_t lim = 20000000, ok = 0; t = now_s();
+        for (uint64_t c = 0; c < lim; c++) {
+            ok += checksum_ok(b);
+            for (int j = NFREE - 1; j >= 0; j--) { int pos = 11 * freeslot[j]; clr11(b, pos);
+                if (++digit[j] < slots[freeslot[j]].n) { put11(b, pos, slots[freeslot[j]].idx[digit[j]]); break; }
+                digit[j] = 0; put11(b, pos, slots[freeslot[j]].idx[0]); }
+        }
+        double en = now_s() - t;
+        printf("  enumerate : %8.2f M combos/s  (%llu of %llu checksum-valid)\n", lim / en / 1e6,
+               (unsigned long long)ok, (unsigned long long)lim);
+        double per_seed = tN / (REPS * 4) + ec;          /* PBKDF2 at the search's width, plus EC */
+        printf("  -> at x%d a seed costs %.1f us (pbkdf2 %.1f + ec %.1f); enumeration is %.1f%% of a\n"
+               "     search over this template (%.3f%% of combos survive the checksum)\n",
+               NWAY, per_seed * 1e6, (tN / (REPS * 4)) * 1e6, ec * 1e6,
+               100.0 * (en / lim) / ((en / lim) + (double)ok / lim * per_seed), 100.0 * ok / lim);
+    }
+}
+
 /* -------------------------------------------------------------- derive */
 static void derive_mode(void) {
     secp256k1_context *ctx = secp256k1_context_create(SECP256K1_CONTEXT_NONE);
@@ -387,9 +595,11 @@ static void derive_mode(void) {
         hex(m.c, 32, hx); printf("master_c %s\n", hx);
         xkey chain;
         if (!account_chain(ctx, seed, &chain)) { printf("invalid\n"); continue; }
+        uint8_t cpub[33];
+        if (!pubkey33(ctx, chain.k, cpub)) { printf("invalid\n"); continue; }
         for (int i = 0; i < NADDR; i++) {
             xkey leaf; uint8_t pub[33], h[20];
-            if (!ckd_normal(ctx, &chain, (uint32_t)i, &leaf) || !pubkey33(ctx, leaf.k, pub)) { printf("addr %d invalid\n", i); continue; }
+            if (!ckd_normal_pub(ctx, &chain, cpub, (uint32_t)i, &leaf) || !pubkey33(ctx, leaf.k, pub)) { printf("addr %d invalid\n", i); continue; }
             hash160(pub, 33, h); hex(h, 20, hx); printf("addr %d %s\n", i, hx);
         }
         printf("end\n");
@@ -400,8 +610,9 @@ static void derive_mode(void) {
 /* ------------------------------------------------------------------ main */
 int main(int argc, char **argv) {
     const char *tmpl = NULL, *wl = "english.txt", *thex = "ccbd031e54cde2a3189fd59bc49f731367a1779e";
-    int threads = (int)sysconf(_SC_NPROCESSORS_ONLN), derive = 0, count = 0;
-    long part_b = 0, part_c = 0, part_n = 1; const char *passphrase = "";
+    int threads = (int)sysconf(_SC_NPROCESSORS_ONLN), derive = 0, count = 0, bench = 0;
+    pbkdf2_set_passphrase("");   /* before the arg loop: --selftest returns from inside it */
+    long part_b = 0, part_c = 0, part_n = 1; const char *passphrase = "", *passfile = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--template") && i + 1 < argc) tmpl = argv[++i];
         else if (!strcmp(argv[i], "--wordlist") && i + 1 < argc) wl = argv[++i];
@@ -410,9 +621,12 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--threads") && i + 1 < argc) threads = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--derive")) derive = 1;
         else if (!strcmp(argv[i], "--list")) list_mode = 1;
+        else if (!strcmp(argv[i], "--list-bin")) list_mode = 3;
         else if (!strcmp(argv[i], "--count")) count = 1;
         else if (!strcmp(argv[i], "--passphrase") && i + 1 < argc) passphrase = argv[++i];
+        else if (!strcmp(argv[i], "--passfile") && i + 1 < argc) passfile = argv[++i];
         else if (!strcmp(argv[i], "--selftest")) return selftest();
+        else if (!strcmp(argv[i], "--bench")) bench = 1;
         else if (!strcmp(argv[i], "--part") && i + 1 < argc) {
             const char *a = argv[++i];
             if (sscanf(a, "%ld..%ld/%ld", &part_b, &part_c, &part_n) != 3) {
@@ -424,17 +638,22 @@ int main(int argc, char **argv) {
         else die("unknown argument");
     }
     if (NADDR < 1 || NADDR > 1000) die("naddr out of range");
-    pbkdf2_set_passphrase(passphrase);
+    if (passfile && *passphrase) die("--passphrase and --passfile are mutually exclusive");
+    pbkdf2_set_passphrase(passphrase);          /* write-once: every worker only reads it */
+    if (passfile) load_passfile(passfile);
     if (threads < 1) threads = 1;
     load_wordlist(wl);
     parse_hex20(thex, target);
     if (derive) { derive_mode(); return 0; }
+    if (bench) { if (tmpl) parse_template(tmpl); bench_mode(); return 0; }
     if (!tmpl) die("need --template or --derive");
     parse_template(tmpl);
     uint64_t N = space_size();
-    if (count || list_mode) { threads = count ? threads : 1; }
-    if (!list_mode) fprintf(stderr, "blmc: %d words, %d free slots, %llu combos, checksum %d bits, %d threads, naddr %d\n",
-                            NW, NFREE, (unsigned long long)N, CS, threads, NADDR);
+    if (count || list_mode) { threads = count ? threads : 1; }   /* --list/--list-bin: one ordered pass */
+    if (!list_mode) fprintf(stderr, "blmc: %d words, %d free slots, %llu combos, checksum %d bits, %d threads, naddr %d%s\n",
+                            NW, NFREE, (unsigned long long)N, CS, threads, NADDR, "");
+    if (passfile && !list_mode) fprintf(stderr, "blmc: %d passphrases from %s - one enumeration pass, "
+                                                "every survivor tested against all of them\n", NPASS, passfile);
     if (count) list_mode = 0;
     /* global range = parts b..c of n; threads split it evenly (last thread takes the remainder) */
     uint64_t glo = (uint64_t)((unsigned __int128)N * (uint64_t)part_b / (uint64_t)part_n);
@@ -442,32 +661,49 @@ int main(int argc, char **argv) {
     if (part_n > 1 && !list_mode) fprintf(stderr, "blmc: part %ld..%ld/%ld -> combos [%llu, %llu)\n",
                                           part_b, part_c, part_n, (unsigned long long)glo, (unsigned long long)ghi);
     N = ghi - glo;
-    pthread_t th[256]; job jobs[256]; if (threads > 256) threads = 256;
-    uint64_t per = N / threads;
-    for (int t = 0; t < threads; t++) {
-        jobs[t].id = t; jobs[t].lo = glo + per * t; jobs[t].hi = (t == threads - 1) ? ghi : glo + per * (t + 1);
-    }
+    pthread_t th[256]; if (threads > 256) threads = 256;
+    G_LO = glo; G_HI = ghi; atomic_store(&next_chunk, 0);
+    /* ~256 checksum-valid seeds per chunk (survival is 2^-CS), but at least 16 chunks per thread
+     * so the tail cannot leave a fast core idle, and never below 1024 combos of odometer work. */
+    CHUNK = (uint64_t)256 << CS;
+    if (CHUNK < 1024) CHUNK = 1024;
+    uint64_t maxc = N / ((uint64_t)threads * 16);
+    if (maxc && CHUNK > maxc) CHUNK = maxc;
+    if (CHUNK < 1) CHUNK = 1;
+    if (list_mode) CHUNK = N ? N : 1;           /* --list/--list-bin are single-threaded: one ordered pass */
     int count_only = count;
     if (count_only) list_mode = 2;   /* 2 = count only: neither derive nor print */
     struct timespec t0; clock_gettime(CLOCK_MONOTONIC, &t0);
-    for (int t = 0; t < threads; t++) pthread_create(&th[t], NULL, worker, &jobs[t]);
+    for (int t = 0; t < threads; t++) pthread_create(&th[t], NULL, worker, NULL);
     if (!list_mode) {
+        /* poll at 250 ms so the reported wall time is the real one (it used to round up to the
+         * next 2 s, which made every short A/B measurement unusable); still print every ~2 s. */
+        double next_print = 0;
         for (;;) {
-            struct timespec ts = {2, 0}; nanosleep(&ts, NULL);
+            struct timespec ts = {0, 250000000L}; nanosleep(&ts, NULL);
             unsigned long long cd = atomic_load(&combos_done), sd = atomic_load(&seeds_done);
             struct timespec t1; clock_gettime(CLOCK_MONOTONIC, &t1);
             double el = (t1.tv_sec - t0.tv_sec) + (t1.tv_nsec - t0.tv_nsec) / 1e9;
-            fprintf(stderr, "\rblmc: %llu/%llu combos  %llu seeds  %.0f seeds/s  hits %d   ",
-                    cd, (unsigned long long)N, sd, sd / (el > 0 ? el : 1), atomic_load(&hits));
-            if (cd >= N || atomic_load(&stop_flag)) break;
+            int done = (cd >= N || atomic_load(&stop_flag));
+            if (el >= next_print || done) {
+                fprintf(stderr, "\rblmc: %llu/%llu combos  %llu seeds  %.0f seeds/s  hits %d   ",
+                        cd, (unsigned long long)N, sd, sd / (el > 0 ? el : 1), atomic_load(&hits));
+                next_print = el + 2.0;
+            }
+            if (done) break;
         }
     }
     for (int t = 0; t < threads; t++) pthread_join(th[t], NULL);
     struct timespec t1; clock_gettime(CLOCK_MONOTONIC, &t1);
     double el = (t1.tv_sec - t0.tv_sec) + (t1.tv_nsec - t0.tv_nsec) / 1e9;
     unsigned long long sd = atomic_load(&seeds_done);
+    if (list_mode == 3) fflush(stdout);
     if (count_only) { printf("total %llu valid %llu\n", (unsigned long long)N, sd); return 0; }
-    if (!list_mode) fprintf(stderr, "\nblmc: done in %.1fs: %llu combos, %llu seeds, %d hits, %.0f seeds/s\n",
-                            el, (unsigned long long)N, sd, atomic_load(&hits), sd / (el > 0 ? el : 1));
+    if (!list_mode) {
+        if (NPASS > 1) fprintf(stderr, "\nblmc: done in %.1fs: %llu combos, %llu seeds (%llu mnemonics x %d passphrases), %d hits, %.0f seeds/s\n",
+                               el, (unsigned long long)N, sd, sd / (unsigned)NPASS, NPASS, atomic_load(&hits), sd / (el > 0 ? el : 1));
+        else fprintf(stderr, "\nblmc: done in %.1fs: %llu combos, %llu seeds, %d hits, %.0f seeds/s\n",
+                     el, (unsigned long long)N, sd, atomic_load(&hits), sd / (el > 0 ? el : 1));
+    }
     return 0;
 }
