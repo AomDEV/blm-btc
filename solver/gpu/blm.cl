@@ -116,6 +116,31 @@ static void master_from_indices(__global const ushort *idx, uint NW,
   new_master_from_seed(BITCOIN_MAINNET, seed, m);
 }
 
+// normal_private_child_from_private, but with the parent's serialized pubkey already in hand.
+// Every leaf under one chain node shares that pubkey, so the stock function recomputed the same
+// EC multiplication once per address. Same hoist as check_seed() in blmc.c.
+static void normal_child_with_pub(extended_private_key_t *parent, uchar *ppub33,
+                                  extended_private_key_t *child, uint i) {
+  uchar hmacsha512_result[64] = { 0 };
+  uchar hmac_input[37] = {0};
+  for (int x = 0; x < 33; x++) hmac_input[x] = ppub33[x];
+  hmac_input[33] = i >> 24;
+  hmac_input[34] = (i & 0x00FF0000) >> 16;
+  hmac_input[35] = (i & 0x0000FF00) >> 8;
+  hmac_input[36] = (i & 0x000000FF);
+  hmac_sha512(&parent->chain_code, 32, &hmac_input, 37, &hmacsha512_result);
+  private_key_t sk;
+  sk.compressed = true;
+  sk.network = parent->network;
+  memcpy(&sk.key, &hmacsha512_result, 32);
+  secp256k1_ec_seckey_tweak_add(&sk.key, &parent->private_key.key);
+  child->network = parent->network;
+  child->depth = parent->depth + 1;
+  child->child_number = i;
+  child->private_key = sk;
+  memcpy_offset(&child->chain_code, &hmacsha512_result, 32, 32);
+}
+
 // hash160 of the compressed pubkey of k; returns p+1 / FLAG|(p+1) / 0
 static uint test_key(extended_private_key_t *k, uchar *tgt, uchar *cn, uint p) {
   extended_public_key_t pub;
@@ -141,10 +166,14 @@ __kernel void blm_check(__global const ushort *indices, const uint NW, const uin
   hardened_private_child_from_private(&k, &k, 0);
   hardened_private_child_from_private(&k, &k, 0);
   normal_private_child_from_private(&k, &k, 0);
+  extended_public_key_t chainpub;                 // one EC mult for the whole address range
+  public_from_private(&k, &chainpub);
+  uchar cpub[33];
+  serialized_public_key(&chainpub, &cpub);
   uint hit = 0;
   for (uint i = 0; i < n_addr && hit == 0; i++) {
     extended_private_key_t leaf;
-    normal_private_child_from_private(&k, &leaf, i);
+    normal_child_with_pub(&k, cpub, &leaf, i);
     hit = test_key(&leaf, tgt, cn, i);
   }
   result[gid] = hit;

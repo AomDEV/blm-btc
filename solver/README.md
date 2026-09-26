@@ -51,7 +51,8 @@ Fixed word | `?` (any of 2048) | `{a|b|c}`. Current frames: `t21*.txt`, `pp.txt`
     ec derive :   37.9 us/seed  (4 pubkey mults)   pubkey33: 8.7 us each
     enumerate :   56.9 M combos/s
 
-A seed costs ~218 us: **PBKDF2 83%, EC 17%, enumeration 1%**. "raw" is the compression loop with
+A seed costs ~218 us: **PBKDF2 83%, EC 17%, enumeration 1%**. The GPU kernel runs at 21,528
+seeds/s and is 89% PBKDF2; hybrid throughput on this machine is ~42,100 seeds/s. "raw" is the compression loop with
 no PBKDF2 glue around it; pbkdf2 x2 is within 1% of it, so the SHA-512 unit is the wall and there
 is nothing left to win in the hashing. The remaining CPU gains all came out of the other 17%.
 Going wider than x2 does not help (the unit saturates at two interleaved streams), which is why

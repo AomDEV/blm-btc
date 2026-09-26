@@ -696,7 +696,7 @@ Every A/B below is interleaved old/new to keep thermal drift out of the comparis
 
 | workload | before | after | |
 |---|---|---|---|
-| full frame | 79.4 s — 22,562 seeds/s | **44.3 s — 40,441 seeds/s** | **1.79x** |
+| full frame | 79.4 s — 22,562 seeds/s | **42.5 s — 42,101 seeds/s** | **1.87x** |
 | 20-passphrase sweep (`t21d` with one slot pinned, 38,214 survivors) | 35.0 s | **19.8 s** | **1.77x** |
 
 ### Where the time goes, and what that rules out
@@ -738,11 +738,36 @@ came out *slower* (9.33 vs 8.85 us per `pubkey33`). No change made.
 | **GPU kernel: HMAC ipad/opad midstates** | the kernel called `sha512(joined, 192)` four times per round and each call re-compressed the 128-byte ipad/opad block from the initial state: 4 block compressions per round where 2 are needed. **9,813 -> 21,075 seeds/s at naddr=2 (2.15x)** |
 | GPU kernel takes the padded salt block as a buffer | passphrase sweeps on the GPU with no program rebuild; the salt *length* as a kernel argument was tried first and measured 35% slower, because the Apple compiler then stops specialising `sha512()` at its call sites |
 | `blmc --list-bin` feeds the GPU raw uint16 indices | no printf on the C side, no text parsing in Python |
+| the kernel recomputed the chain node's pubkey once per address, exactly as `check_seed` did on the CPU | 5 EC mults/seed -> 4: **+1.9% at naddr=2, +36% at naddr=20** (10,742 -> 14,613 seeds/s) |
 | `BLM_GPU_SHARE` default 0.15 -> 0.46, and every run prints the share that would have balanced the two engines | on this machine the two engines are near-equal; 0.15 left most of the GPU idle, and 0.58 made the GPU gate the run (53 s vs 47 s) |
 
-Share/thread sweep on the full frame after the kernel fix, seeds/s: 0.42+8t 39,014 | 0.42+7t
-35,890 | **0.46+8t 40,441** | 0.46+7t 39,431. Holding a core back for the feeder does not pay:
-threads must stay at the core count. Before the kernel fix the same sweep peaked at 37,244.
+Share/thread sweep on the full frame, seeds/s: 0.42+8t 39,014 | 0.42+7t 35,890 | **0.46+8t
+42,101** | 0.46+7t 39,431 | 0.48+8t 40,969. Holding a core back for the feeder does not pay:
+threads must stay at the core count. Before the midstate fix the same sweep peaked at 37,244.
+
+### Three GPU hypotheses, all falsified by measurement
+With the kernel at 21,528 seeds/s and 89% of that PBKDF2, the obvious next suspect was occupancy:
+the Apple GPU spills private memory past its register budget, and the kernel asks for a lot of it.
+Three independent reductions were tried and **none moved the number**:
+
+| change | private memory | naddr=2 |
+|---|---|---|
+| baseline | `W[80]` = 640 B | 21,528 |
+| 16-word rolling message schedule, looped `(j+1)&15` | 128 B | 15,789 (**25% worse** — the modular indexing defeats the compiler) |
+| the same, fully unrolled | 128 B | 21,014 (no gain) |
+| `tmp[512]`->`[256]`, `mnemonic[256]`->`[224]` | -288 B | 21,553 (no gain) |
+| workgroup 16 / 32 / 64 / 128 / 256 | — | 21,042 / 21,051 / 21,158 / 19,476 / 19,470 |
+
+So the kernel is arithmetic-bound, not occupancy-bound, and all three changes were reverted.
+`rotr64` already compiles to OpenCL's `rotate()` builtin. At 88 M block compressions/s the GPU is
+~26% of the M3's theoretical integer peak, and closing that would mean hand-splitting SHA-512 into
+32-bit halves rather than relying on the compiler's 64-bit emulation — a large rewrite of the
+round function with real correctness risk, for an uncertain 10-20% on the GPU half.
+
+**Both engines are now at their practical limits for this algorithm.** What is left is not engine
+work: `--naddr 1` would save ~4-5% at the cost of halving address coverage, `--part b..c/n` scales
+linearly across machines, and FINDINGS.md's own conclusion still holds — the bottleneck is word
+selection, not compute.
 
 ### Correctness
 `c/test_blmc.py` still prints ALL PASS on both the O2 and the ASan+UBSan build, and gained:
