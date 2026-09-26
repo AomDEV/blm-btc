@@ -1,0 +1,21 @@
+# queue5 - this/real anchor family (2026-09-26): fixed 15 + this@{14,8,6} x real@{6,15,10}, other 4 open slots over the 90-pool (t21f pool + question)
+python3 -u gpu/cgpu.py t21r_t14_r6.txt
+python3 -u gpu/cgpu.py t21r_t14_r15.txt
+python3 -u gpu/cgpu.py t21r_t14_r10.txt
+python3 -u gpu/cgpu.py t21r_t8_r6.txt
+python3 -u gpu/cgpu.py t21r_t8_r15.txt
+python3 -u gpu/cgpu.py t21r_t8_r10.txt
+python3 -u gpu/cgpu.py t21r_t6_r15.txt
+python3 -u gpu/cgpu.py t21r_t6_r10.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21r_t14_r6.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21r_t14_r15.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21r_t14_r10.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21r_t8_r6.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21r_t8_r15.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21r_t8_r10.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21r_t6_r15.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21r_t6_r10.txt
+python3 -u gpu/cgpu.py t21r_t14_r6.txt@passlist.txt
+python3 -u gpu/cgpu.py t21r_t8_r6.txt@passlist_top.txt
+python3 -u gpu/cgpu.py t21r_t14_r15.txt@passlist_top.txt
+BLM_BLMC_ARGS="--nochecksum" python3 -u gpu/cgpu.py t21r_t14_r6.txt

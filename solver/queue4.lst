@@ -1,0 +1,25 @@
+# queue4 - open-slot frames first (t21x1: slot 14 fully free; t21x2: slots 6 and 14 fully free), then the rest of queue3
+python3 -u gpu/cgpu.py t21x1.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21x1.txt
+python3 -u gpu/cgpu.py t21x1.txt@passlist.txt
+BLM_BLMC_ARGS="--nochecksum" python3 -u gpu/cgpu.py t21x1.txt
+python3 -u gpu/cgpu.py t21x2.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21x2.txt
+# --- remaining queue3 entries (the interrupted one first) ---
+python3 -u gpu/cgpu.py t21f.txt@passlist.txt
+python3 -u gpu/cgpu.py pp.txt@passlist_top.txt
+python3 -u gpu/cgpu.py pq.txt@passlist_top.txt
+BLM_BLMC_ARGS="--nochecksum" python3 -u gpu/cgpu.py t21f.txt
+BLM_BLMC_ARGS="--nochecksum" python3 -u gpu/cgpu.py pp.txt
+BLM_BLMC_ARGS="--nochecksum" python3 -u gpu/cgpu.py pq.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21g.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21h.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21d.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21c.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21b.txt
+# --- 25 new passphrase candidates from the second picture pass (seal mottos, tablet, monogram, dates) ---
+python3 -u gpu/cgpu.py t21x1.txt@passlist_new.txt
+python3 -u gpu/cgpu.py t21f.txt@passlist_new.txt
+python3 -u gpu/cgpu.py pp.txt@passlist_new.txt
+python3 -u gpu/cgpu.py pq.txt@passlist_new.txt

@@ -1020,3 +1020,127 @@ field; Coinomi / Blockchain.com / Bitcoin.com / Samourai / Atomic use `m/44'/0'/
   feed with seeds == combos; `--paths ext` via cgpu with the GPU off). **ALL PASS on both builds.**
 
 ## Runs (queue3, M1) — results appended below as they finish
+
+## Fresh-eyes pass on the picture (agent, 2026-09-26 evening) — verified facts and one new frame family
+Pixel checks (regions in master-image coordinates):
+* **"8:46" is not in the image.** Floyd's hoodie `(930,300,220,130)` carries only `05.25.20 / I can't /
+  BREATHE`. The 8:46 support for `black`@8 was external knowledge; `black`@8 now rests on the 8-word
+  Latin line (*niger*), the 8 coat buttons, and the rune column's "number X" being a single glyph.
+* Pyramid courses 13 (mortar minima y = 894 … 1012), flag stripes 13 (scan at 43° from `(395,450)`:
+  K T R ×4 + K) — both canonical, only the stars were altered. Exactly two red question marks on the
+  canvas (`(1023,784)` election, `(338,704)` Liberty) → a count reading of `question` is 2 (taken).
+  No "M16" marking on the rifle `(780,680,80,50)` — `rifle`@16 is external knowledge too.
+* `PAY FOR THE FVTURE.` uses a Roman **V** and both pedestal lines end with a period. `ONLY real BITCOIN`
+  and `PAY FOR THE FVTURE` are both 15 letters (`real`@15 as a low-grade alternate; letter-counting
+  is not a mechanism the image uses anywhere else).
+* Correction: in `c/english.txt` (1-indexed) `that`=1792, `they`=1797, `this`=1799, `time`=**1811**;
+  an earlier note gave `time` as 1799.
+* Dead channel: "a word's ordinal inside its caption = its position" contradicts three measured pairs
+  (`future`→4, `this`→5, `police`→9), so it is not the rule.
+
+Reasoning that produced the new frames:
+* `brave new world` occurs in the novel's body text only in chapters 8, 11, 15 (nav boilerplate stripped;
+  all 18 chapters grepped). 11 = `pyramid` (measured); 8 has three supports for `black`; so **`brave`@15**.
+* `11.03.20` under the clock's own "sum of two numbers" rule: 11+3 = **14**, the only reading of either
+  date that lands inside 1..21 — and 14 is the one slot with no word at all. `.VS.`→12 already shows the
+  election panel carries a numeral channel. The word is unknown (`debate`, `question` are depicted, not
+  written) → leave **slot 14 fully open (all 2048 words)**.
+* With 6 also open and 8/10/15/18/21 as short alternates, the space is small enough to run with every
+  coverage switch: `t21x1.txt` (slot 14 open, slot 6 over 17 candidates; 31.3 M combos, 245,409 survivors)
+  and `t21x2.txt` (slots 6 and 14 open; 3.77 G combos, 29,506,599 survivors). `queue4.lst` runs t21x1
+  std / ext / 122 passphrases / checksum-free, then t21x2 std / ext, then the rest of queue3.
+
+### queue3 entries 1-11 (M1, `--paths ext`, compressed + uncompressed) — all negative
+| frame | seeds | paths per seed | result |
+|---|---|---|---|
+| t21f, pp, pq, t21j, t21k, t21l, t21m (4-slot 89-pool frames) | 488,066 – 490,905 each | 2 std + 10 ext, both key forms | 0 hits, ~56 s each at 8,700 seeds/s |
+| t21n, t21o (3-slot) | 5,520 / 5,512 | same | 0 hits |
+| t21t, t21u (3-slot 127-pool) | 16,255 / 16,075 | same | 0 hits |
+
+So for these eleven frames the "wrong path" and "wrong key form" explanations are gone: every one of
+their survivors was tested at 12 derivations x 2 key forms. The queue was then stopped at entry 12 and
+re-issued as `queue4.lst` with the open-slot frames in front.
+
+## On-chain facts (fetched 2026-09-26 from blockstream.info) — no message, but a dating constraint
+* Funding tx `fcee21d4…` (block time 1589097706 = **10 May 2020 10:01:46 UTC**): version 1, locktime 0,
+  4 inputs, all **P2SH with 2 witness items = P2SH-P2WPKH** (nested segwit, the 2020 default of
+  Trezor/Ledger/Electrum-BIP39-import "p2sh-segwit"), outputs = the puzzle P2PKH (20,000,000 sat) + a
+  P2SH change. **No OP_RETURN** in the funding tx, and none in the four later deposits (2023-10, 2024-12
+  100,000 sat, 2025-05, 2025-06 dust). Nothing is written on-chain.
+* The author's own wallet was nested-segwit; the puzzle address is legacy P2PKH. So the puzzle key was
+  produced by a *different* tool from the author's daily wallet — consistent with the picture's BIP44
+  pointers (44 stars, "ONLY real BITCOIN", "FIRST") and with iancoleman's page, whose defaults are exactly
+  BIP44 / legacy / compressed and which **refuses an invalid checksum**. That lowers the prior of the
+  checksum-free branch relative to the passphrase branch (iancoleman has the passphrase field).
+* **The address was funded 15 days before George Floyd died (25 May 2020).** Everything the picture
+  draws from later events (Floyd, the Leopold bust of 4 June, the election, the Sept/Oct Wikipedia
+  revisions, the "Brave New World" series of July) was chosen *after* the seed existed. The 21 words were
+  fixed by 10 May 2020 and the picture was built around them, not the other way round. Two consequences:
+  the words are thematically coherent (mask, police, liberty, vote, world…), i.e. hand-picked, and with
+  21 words the last word is one of exactly 16 checksum-valid choices for a given first 20 — so word 21 is
+  the one the author had least freedom over, which fits a "found" reading like `food` = Century 21.
+
+## Passphrase pass on the picture (agent, 2026-09-26 evening) — verified facts
+* File level: alpha is uniformly 255 (the "transparent" SHT is low-contrast ink); PNG has no tEXt/iTXt/
+  zTXt/eXIf chunks and no bytes after IEND. **No metadata channel.**
+* **No lock, key, keyhole, door, safe, or "25" anywhere** (16 tiles at 2x, then a high-pass render). The
+  camera junction box `(1380-1470,170-250)` is an embossed triangle-with-eye, not a glyph.
+* `1865 - 202…?` at `(190,600,200,120)`: hyphen with spaces, exactly three dots, red `?` (the same red as
+  the election `?`). No hidden fourth digit under any stretch — the value is deliberately withheld.
+* Liberty's tablet `(255-305,712-790)`: `BLM` underlined; a ~14 px circle with a two-stroke cross ("XX");
+  `SHT` at `(252-284,765-795)`, three glyphs on a -58° diagonal, recovered by unsharp masking. Nothing
+  else on the tablet. Both of the Seal/Statue date slots (JULY IV MDCCLXXVI, MDCCLXXVI) are overwritten.
+* Signatures: top-left `CHaRLy` (capitals C H R L, lower-case a y), underlined. **Bottom-right
+  `(1532-1552,1135-1148)` is a ruled monogram `CHR`** with a dash each side — the capitals of CHaRLy,
+  not "JR" and not illegible. No digits, no year.
+* **The Great Seal's three Latin lines are all author-substituted and mirrored** (`(440,740,460,400)`,
+  flipped): `RERUM COGNOSCERE CAUSAS` in the ANNUIT COEPTIS arc, `UBI BENE IBI PATRIA` in the NOVUS ORDO
+  SECLORUM arc, `FIAT IUSTITIA ET PEREAT MUNDUS` on the base band where the date MDCCLXXVI belongs.
+  Same authored-plus-encoded shape as TUESDAY; none had been swept.
+* `BREATHE` appears a second time, on the Leopold bust's red scarf `(1355-1425,527-545)`.
+* The Gravity Falls line is exactly 7 glyphs, nothing before or after; **no second GF line** anywhere.
+  Rune-column bands segment 5:11:8:2:6:4:5:1 bottom-to-top; separators are 3 dots at y≈59, 148, 397
+  and 2 dots elsewhere (not pursued). No Russian word for password/key/phrase/25 anywhere.
+* The yellow ink is only the face-detection network and the cursive `Order and stability`. The grey
+  "20" near the cameras is a cloud shadow.
+Outcome: **the picture carries no positive marker that a passphrase exists.** 25 new candidates
+(`passlist_new.txt`, merged into `passlist.txt` → 147) queued against t21x1, t21f, pp, pq.
+
+## Position pass on the inserted words `this` and `real` (agent, 2026-09-26 evening)
+Measured:
+* **Pedestal `(100,1046)-(245,1151)`: 6 courses** (rules at y = 1046, 1066, 1078, 1103, 1121, 1142, base
+  ≈1151). `ONLY real BITCOIN` sits on the **6th course from the ground**; `real` (x144-170, cap height 9)
+  is shorter than ONLY/BITCOIN (11) and set off by 17 px / 11 px gaps where the hand's word space is ~6
+  px — inserted into an existing line. A ghost `ONLY BITCOIN` survives on the 4th course at 1-2 grey
+  levels. Die: `PAY FOR THE FVTURE.` / `THIS IS THE FIRST PREDICTION.` (15 and 24 letters).
+* **Headline: 8 words as drawn, 7 corrected.** Last line boxes IN 515-548, THE 558-612, THIS 624-708,
+  PICTURE 710-845 (y 372-411); ink strength IN 8.4, **THE 7.0 (faintest)**, THIS 9.2 — the *second THE*
+  is the inserted mark, THIS is the word it marks.
+* **13th-Amendment plinth** (red channel suppresses the spray): no heading, so "13" is never written;
+  9 body lines; `1` underlined (y 822-823, x 1420-1434) and `subject` underlined (y 902). Graffiti
+  bands FUCK y 786-845, THIS y 848-897 (x 1318-1450), SHIT y 900-956. Graffiti pitch ~56 px vs text
+  pitch ~9.8 px: no line alignment carries a number.
+* Clock-dial readings for both words: headline THIS lands *on* digit 3, pedestal `real` is 6° off the
+  10/11 bisector at r = 335 (dial r = 184), graffiti THIS 2.5° off 5/6 → 11 (taken). Nothing.
+* Tablet line 2 is one circled ~10 px glyph (a "4" or an "X"), not "XX"; the wreath cartouche is three
+  unequal vertical strokes under a bar (a monogram, not XIII).
+
+Proposals: **`real`@6** (6 courses AND the inscribed course is the 6th — two readings of 6 on the object
+the word is written on; med-high). **`this`@14** (13th Amendment + the underlined `1` under the sum rule;
+14 was the one slot with no candidate; medium). Alternates: `this`@8 (the headline is 8 words *because*
+a word was inserted — the same mechanism as `black`@8 but authored rather than inherited), `this`@6
+(word 6 of the corrected headline), `real`@15 (15 letters, paired with the 15-letter PAY FOR THE FVTURE),
+`real`@10 (course 6 + control course 4).
+
+**The tidy full map** 1 subject · 2 camera · 3 tower · 4 mask · 5 police · 6 real · 7 liberty · 8 black ·
+9 eye · 10 order · 11 pyramid · 12 vote · 13 moon · 14 this · 15 brave · 16 rifle · 17 gold · 18 world ·
+19 glove · 20 second · 21 food **fails the BIP39 checksum** — so at least one of these assignments is
+wrong (or the phrase is checksum-invalid, the Electrum branch). The agent also ran the 8-word pool
+{real, this, black, order, flag, green, food, brave} over slots {6,8,10,14,15,21}: 144 checksum-valid
+frames on the full legacy path scan and all 20,160 permutations checksum-free on n2, both key forms —
+no hit.
+
+Search consequence: `t21r_t{14,8,6}_r{6,15,10}.txt` (8 frames): the 15 established pairs + `this` and
+`real` at their candidate positions, the remaining four of {6,8,10,14,15,21} open over the 90-pool
+(65.6 M combos, ~512 k survivors each). `queue5.lst` runs them std, then ext, then passphrases on the
+top three, then checksum-free on t21r_t14_r6.
