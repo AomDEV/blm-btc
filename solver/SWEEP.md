@@ -1144,3 +1144,19 @@ Search consequence: `t21r_t{14,8,6}_r{6,15,10}.txt` (8 frames): the 15 establish
 `real` at their candidate positions, the remaining four of {6,8,10,14,15,21} open over the 90-pool
 (65.6 M combos, ~512 k survivors each). `queue5.lst` runs them std, then ext, then passphrases on the
 top three, then checksum-free on t21r_t14_r6.
+
+### queue6 entries 1-16: the eight `this`/`real` anchor frames — all negative (M1, 2026-09-26 15:00)
+| frame (this@, real@) | survivors | std n2 | ext paths | key forms |
+|---|---|---|---|---|
+| t14_r6, t14_r15, t14_r10, t8_r6, t8_r15, t8_r10, t6_r15, t6_r10 | 512,019 – 513,365 each | 0 hits, 27 s each | 0 hits, ~58 s each | both |
+
+Also negative from queue4: `t21x1` checksum-free (all 31,334,400 combos derived, 19,322 seeds/s) and its
+122-passphrase sweep (29,939,898 derivations). Running next: 147 passphrases on t21r_t14_r6, then top-30
+on t8_r6 and t14_r15, checksum-free on t14_r6, then t21x2 (slots 6+14 open) and the coverage tail.
+
+Reading of the negatives so far: with `this`@14 and `real`@6 fixed, four open slots over the 90-word
+inventory pool do not contain the phrase on any of 12 paths x 2 key forms. So either one of the 15
+"established" pairs is wrong, or one of the four remaining words is outside the inventory pool. The
+second is now the cheaper hypothesis to test — `queue7.lst` opens two of {8,10,15,21} to all 2048 words
+(six frames, ~265 M survivors each) and `t21r_alt.txt` swaps the plausible alternates for the high slots
+(twin/end/debate/gun/weapon/price/brave/welcome/hand). Those are M4-sized (queue7 ≈ 9 h there).

@@ -1,0 +1,42 @@
+# queue5 - this/real anchor family (2026-09-26): fixed 15 + this@{14,8,6} x real@{6,15,10}, other 4 open slots over the 90-pool (t21f pool + question)
+python3 -u gpu/cgpu.py t21r_t14_r6.txt
+python3 -u gpu/cgpu.py t21r_t14_r15.txt
+python3 -u gpu/cgpu.py t21r_t14_r10.txt
+python3 -u gpu/cgpu.py t21r_t8_r6.txt
+python3 -u gpu/cgpu.py t21r_t8_r15.txt
+python3 -u gpu/cgpu.py t21r_t8_r10.txt
+python3 -u gpu/cgpu.py t21r_t6_r15.txt
+python3 -u gpu/cgpu.py t21r_t6_r10.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21r_t14_r6.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21r_t14_r15.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21r_t14_r10.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21r_t8_r6.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21r_t8_r15.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21r_t8_r10.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21r_t6_r15.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21r_t6_r10.txt
+python3 -u gpu/cgpu.py t21r_t14_r6.txt@passlist.txt
+python3 -u gpu/cgpu.py t21r_t8_r6.txt@passlist_top.txt
+python3 -u gpu/cgpu.py t21r_t14_r15.txt@passlist_top.txt
+BLM_BLMC_ARGS="--nochecksum" python3 -u gpu/cgpu.py t21r_t14_r6.txt
+# --- remaining queue4 entries ---
+python3 -u gpu/cgpu.py t21x2.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21x2.txt
+python3 -u gpu/cgpu.py t21f.txt@passlist.txt
+python3 -u gpu/cgpu.py pp.txt@passlist_top.txt
+python3 -u gpu/cgpu.py pq.txt@passlist_top.txt
+BLM_BLMC_ARGS="--nochecksum" python3 -u gpu/cgpu.py t21f.txt
+BLM_BLMC_ARGS="--nochecksum" python3 -u gpu/cgpu.py pp.txt
+BLM_BLMC_ARGS="--nochecksum" python3 -u gpu/cgpu.py pq.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21g.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21h.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21d.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21c.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21b.txt
+python3 -u gpu/cgpu.py t21x1.txt@passlist_new.txt
+python3 -u gpu/cgpu.py t21f.txt@passlist_new.txt
+python3 -u gpu/cgpu.py pp.txt@passlist_new.txt
+python3 -u gpu/cgpu.py pq.txt@passlist_new.txt
+# --- appended 15:05: alternates frame with this@14 real@6 (148 M survivors, ~2 h on the M1) ---
+python3 -u gpu/cgpu.py t21r_alt.txt

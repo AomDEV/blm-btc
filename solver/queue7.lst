@@ -1,0 +1,9 @@
+# queue7 (for the M4): this@14 real@6 anchors, two of {8,10,15,21} fully open (2048 words each), the other two over the 90-pool.
+# 3.4e10 combos / ~265 M survivors per frame: ~4 h each on the M1, ~1.5 h on the M4. Then the alternates frame.
+python3 -u gpu/cgpu.py t21r_open8_10.txt
+python3 -u gpu/cgpu.py t21r_open8_15.txt
+python3 -u gpu/cgpu.py t21r_open8_21.txt
+python3 -u gpu/cgpu.py t21r_open10_15.txt
+python3 -u gpu/cgpu.py t21r_open10_21.txt
+python3 -u gpu/cgpu.py t21r_open15_21.txt
+python3 -u gpu/cgpu.py t21r_alt.txt
