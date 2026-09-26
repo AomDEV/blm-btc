@@ -1353,3 +1353,26 @@ E PLURIBUS UNUM are 13); the Norinco CQ is made by Sichuan Changqing; Blackout T
   oval (no 7); nothing in her hair; Trump's collar and Biden's neck carry no digits; the Latin ribbon is
   plain; the rifle receiver has one faint, ambiguous mark at ≈(817,698) that reads as traced stock
   line-art detail, not a legible 10 or 19. Negative.
+
+## 2026-09-27 — order and passphrase closures on the tidy word set
+Tidy set: subject camera tower mask police real liberty black eye order pyramid vote moon this brave rifle
+gold world glove second food. All derivations on 12 paths x 2 key forms.
+* **Order:** all 210 pairwise position swaps (2 checksum-valid) and all 10! orders of the ten least-certain
+  slots {6,8,9,10,11,14,15,18,20,21} (28,298 valid): none. The set is not merely misordered.
+* **Words:** every checksum-legal single swap that is picture-plausible (27 more: weapon@1, soldier/cause/
+  debate@2, news/october/hand@3, cloud/green@6, next@9, crime/digital@10, major@11, medal/they@12, flip@13,
+  trade@15, space/gun@16, sun/second@18, cloud@19, mobile/they@20, ghost/earth/uniform@21): none. One- or
+  two-word substitutions from 39 event words of 05.25.20 / 11.03.20 / 1865 (police knee neck minute memory
+  arrest life street cash shop car hand face fire riot march peace matter help mother cry vote debate mail
+  state blue win result end section april civil idea liberty south north flag order general): 2,437 valid,
+  none.
+* **Passphrase:** the union of the 10-slot permutations and the 1/2-word picture substitutions (48,698
+  phrases) re-derived under 20 passphrases (TUESDAY/Tuesday/tuesday, BREATHE/breathe, I can't BREATHE,
+  BLM/blm, вторник/ВТОРНИК, 05.25.20, 11.03.20, 1865, X, 21, SHT, CHaRLy, black/BLACK, Black Lives
+  Matter): **0 hits** (750 s).
+* Dates as positions: 05.25.20 gives only 5 in range (= police, coherent with line 5); 11.03.20 gives
+  11, 3 (taken) and 11+3 = 14 (word unknown); 1865's events give 13, 19, 14, 9, 17, 18, 6, 5, 20, all
+  already occupied by drawn-count pairs. Consistent with the 0/14 date-rule result.
+Conclusion: within one or two word errors, any order of the uncertain slots, and the 20 best passphrases,
+the tidy set does not produce the address. The remaining hypotheses are ≥3 wrong words, a word outside
+the picture vocabulary, a different word count, or a passphrase outside the list.
