@@ -1254,3 +1254,30 @@ and 5 doubles that pass the checksum (all derived on 301 paths x 2 key forms: no
 of alternates per slot (1.12 G combos, 8,750,035 valid, 0 hits, 558 s). Its own caveat stands: positions
 8, 10, 15, 16, 17, 18, 20, 21 are all externally derived, so a wrong POSITION is at least as likely as a
 wrong word, and no word swap can fix that.
+
+## 2026-09-26 late — the three follow-ups, measured
+1. **Which hand is which.** Perpendicular ink profiles along each hand axis (median-filtered background):
+   TOWER (116.9°) is broad (13-15 px) and continuous to r ≈ 190 → the **minute** hand; the unlabelled hand
+   (209.5°) is broad (11-13 px) and continuous to r ≈ 150 → the **hour** hand; MOON (145.9°) is thin
+   (5 px, red) to r ≈ 170 → the **second** hand. A faint-ink render of the whole dial (`clock_faint.png`:
+   background median 91 px, ink clipped at 12 levels) shows exactly three hands and no ghost hand; the
+   digits 12, 1, 2, 3, 4, 8, 9, 10, 11 are drawn, 5-7 are under the seal (5 and 6 absent, 7 present at
+   (589,1084)). The angular scan also found a thin stroke at 60-66° for r 40-150, but it does not pass
+   through the centre (its line runs ~100 px above it) and is seal artwork. **So `second`@21 is refuted:
+   the second hand is the one labelled MOON**, and the 21 belongs to the hour hand. Time shown ≈ 10:07:13.
+2. **Slot 21 along the hour-hand axis.** Distances from the axis line to the three candidate words:
+   rune `чёрный` (black) 11 px; the inserted `real` on the pedestal 55 px (the forward line meets the
+   pedestal at y ≈ 1118 under x = 157, two courses below the word); `Food` in the Needle ≥ 100 px (the line
+   crosses the saucer 100-150 px above the label). On alignment alone **black > real > food** for 21, with
+   the caveat that black is on the back-extension, not in the pointing direction.
+3. **The mottos as a source.** Letter counts: `RERUM COGNOSCERE CAUSAS` = **21** letters (in the slot of
+   ANNUIT COEPTIS = 13), `UBI BENE IBI PATRIA` = 16 (slot of NOVUS ORDO SECLORUM = 17), `FIAT IUSTITIA ET
+   PEREAT MUNDUS` = 26 (in the date slot; the whitepaper band below is a 26-word sentence). The 21-letter
+   motto is the picture's only explicit 21 besides the hour hand — read as the word count. Translations
+   (world, country, cause, good, thing, know) carry no position that I can find; recorded as a pool only.
+4. **Evidence-only alternates frame** `t21_evid.txt` (every word has picture or source support:
+   {camera|twin} {mask|face} {real|flag|green}@6 {brave|food|flag|first|order|black}@8 {order|first|black}@10
+   {vote|question|debate} {brave|food|real|flag|black}@15 {rifle|gun|weapon} {hand|glove}
+   {second|blood|canvas|hood}@20 {black|real|food}@21, rest fixed): 233,280 combos, **1,791 checksum-valid,
+   0 hits on 12 paths x 2 key forms** (0.3 s). Also the structured black@21 / real@21 families by hand:
+   600 phrases, 6 checksum-valid, none derive.
