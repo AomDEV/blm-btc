@@ -3,9 +3,10 @@
 
   1. gpu.py selftest     positive controls on 5 mnemonic shapes + negative control (kernel maths)
   2. passphrase          a planted hit found WITH a passphrase, and missed without it
-  3. cgpu sweep          TEMPLATE@PASSFILE: hit in the GPU's parts is found by the GPU and tagged
-  4. coverage            derivations == survivors x passphrases, counted across both engines
-  5. fault fallback      BLM_CGPU_FAULT: the GPU's parts are re-run on the CPU, hit still found
+  3. plain run           TEMPLATE with no passfile - the README's default command
+  4. cgpu sweep          TEMPLATE@PASSFILE: hit in the GPU's parts is found by the GPU and tagged
+  5. coverage            derivations == survivors x passphrases, counted across both engines
+  6. fault fallback      BLM_CGPU_FAULT: the GPU's parts are re-run on the CPU, hit still found
 
 Needs pyopencl and a GPU; skips cleanly (exit 0) if the GPU is unavailable.
 """
@@ -62,11 +63,15 @@ def test_passphrase_kernel():
     report("kernel passphrase: hit with it, miss without", hit == 2 and miss == 0, f"hit={hit} miss={miss}")
 
 def run_cgpu(t, p, tgt, share, fault=False):
-    env = dict(os.environ, BLM_TARGET_H160=tgt, BLM_GPU_SHARE=str(share), BLM_THREADS="2")
+    """BLM_HIT_FILE keeps planted test hits out of solver/HIT.txt - that file is the one artifact
+    this project exists to produce, and the README tells people to run this suite during setup."""
+    hitf = f"{TMP}/HIT.txt"
+    env = dict(os.environ, BLM_TARGET_H160=tgt, BLM_GPU_SHARE=str(share), BLM_THREADS="2",
+               BLM_HIT_FILE=hitf)
     if fault: env["BLM_CGPU_FAULT"] = "1"
-    hitf = os.path.join(SOLVER, "HIT.txt")
     if os.path.exists(hitf): os.remove(hitf)
-    r = subprocess.run([sys.executable, f"{HERE}/cgpu.py", f"{t}@{p}"], capture_output=True, text=True, env=env, cwd=SOLVER)
+    arg = f"{t}@{p}" if p else t
+    r = subprocess.run([sys.executable, f"{HERE}/cgpu.py", arg], capture_output=True, text=True, env=env, cwd=SOLVER)
     hits = open(hitf).read() if os.path.exists(hitf) else ""
     if os.path.exists(hitf): os.remove(hitf)
     return r.stdout + r.stderr, hits
@@ -80,6 +85,16 @@ def test_sweep(t, p, tgt, nvalid):
     report("sweep: derivations == survivors x passphrases", tot == nvalid * 3,
            f"{tot} vs {nvalid} x 3" + (f" (gpu {m.group(3)} / cpu {m.group(4)})" if m else ""))
 
+def test_plain_run(t, tgt):
+    """The README's default command (no passfile) goes through run(), whose GPU rows are now
+    read-only numpy views over the binary feed. A search that finds nothing never executes the
+    reap path, so the hit branch needs its own case."""
+    tgt0 = blm.h160s(blm.derive(blm.master_from_seed(blm.mnemonic_to_seed(" ".join(KNOWN))),
+                                (44 | H, 0 | H, 0 | H, 0, 1)))[0].hex()   # no passphrase here
+    out, hits = run_cgpu(t, None, tgt0, 0.60)
+    report("plain run (no passfile): hit found by the GPU over the binary feed",
+           "[gpu-n2]" in hits and " ".join(KNOWN) in hits, hits.strip()[:90] or out.strip()[-90:])
+
 def test_fault(t, p, tgt, nvalid):
     out, hits = run_cgpu(t, p, tgt, 0.60, fault=True)
     report("injected GPU fault: parts re-run on the CPU, hit still found",
@@ -87,5 +102,6 @@ def test_fault(t, p, tgt, nvalid):
 
 t, p, tgt, nvalid = build_case()
 print(f"[cgpu-test] frame has {nvalid} checksum-valid mnemonics, 3 passphrases, hit at {PW!r}")
-test_gpu_selftest(); test_passphrase_kernel(); test_sweep(t, p, tgt, nvalid); test_fault(t, p, tgt, nvalid)
+test_gpu_selftest(); test_passphrase_kernel(); test_plain_run(t, tgt)
+test_sweep(t, p, tgt, nvalid); test_fault(t, p, tgt, nvalid)
 print("ALL PASS" if not fails else f"{fails} FAILED"); sys.exit(1 if fails else 0)

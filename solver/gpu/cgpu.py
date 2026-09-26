@@ -135,7 +135,7 @@ def run(tmpl_path, passphrase=""):
         print(f"[cgpu] gpu finished at {gpu_done_at:.0f}s of {el:.0f}s "
               f"({grate:,.0f} gpu seeds/s vs {crate:,.0f} cpu seeds/s) -> BLM_GPU_SHARE={best:.2f} balances them",
               flush=True)
-    hit_file = os.path.join(SOLVER, "HIT.txt")
+    hit_file = os.environ.get("BLM_HIT_FILE") or os.path.join(SOLVER, "HIT.txt")
     if os.path.exists(hit_file): print("[cgpu] HIT.txt:\n" + open(hit_file).read())
 
 
@@ -238,7 +238,7 @@ def run_passphrases(tmpl_path, passfile):
         print(f"[cgpu] gpu finished at {gpu_done[0]:.0f}s of {el:.0f}s "
               f"({grate:,.0f} vs {crate:,.0f} cpu seeds/s) -> BLM_GPU_SHARE={grate/(grate+crate):.2f} balances them",
               flush=True)
-    hit_file = os.path.join(SOLVER, "HIT.txt")
+    hit_file = os.environ.get("BLM_HIT_FILE") or os.path.join(SOLVER, "HIT.txt")
     if os.path.exists(hit_file): print("[cgpu] HIT.txt:\n" + open(hit_file).read())
 
 

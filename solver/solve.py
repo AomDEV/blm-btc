@@ -123,7 +123,9 @@ elif _paths == "n2":
     bulk_check = bulk_check_n2
 
 
-HIT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "HIT.txt")
+# BLM_HIT_FILE lets tests redirect hits; without it, hits always land next to this file so they
+# cannot be lost to whatever directory a run happened to start in.
+HIT_FILE = os.environ.get("BLM_HIT_FILE") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "HIT.txt")
 
 def record(mnemonic, path, extra=""):
     line = f"*** HIT *** {mnemonic!r} path={path} {extra}\n"

@@ -312,7 +312,8 @@ static void report_hit(const char *mn, int i, const char *pw) {
     if (pw && *pw) snprintf(tail, sizeof tail, " passphrase='%s'", pw);
     pthread_mutex_lock(&hit_mu);
     printf("\n*** HIT *** '%s' path=m/44h/0h/0h/0/%d%s [blmc]\n", mn, i, tail); fflush(stdout);
-    FILE *f = fopen("HIT.txt", "a");
+    const char *hf = getenv("BLM_HIT_FILE");            /* tests redirect; default is cwd/HIT.txt */
+    FILE *f = fopen(hf && *hf ? hf : "HIT.txt", "a");
     if (f) { fprintf(f, "*** HIT *** '%s' path=m/44h/0h/0h/0/%d%s [blmc]\n", mn, i, tail); fclose(f); }
     atomic_fetch_add(&hits, 1);
     atomic_store(&stop_flag, 1);
