@@ -1183,3 +1183,74 @@ t21g/t21h and the old frames, the 25 new passphrases, t21r_alt).
 **2026-09-26 19:00 — queue6 stopped by the user at entry 23** (t21f x 147 passphrases had just started;
 entries 23-34 — the coverage tail and t21r_alt — did not run). Reason given: brute force over guessed
 frames does not guarantee a hit. State: every run listed above is negative; nothing is running.
+
+## Full-canvas channel / underdrawing / geometry sweep (agent, 2026-09-26 night) — measured
+* **The third (unlabelled, "21") clock hand's axis**, measured independently at 209.52° ±0.6° (TOWER
+  116.88°, MOON 145.91°; all within 0.3° of the earlier passes): the hand's ink runs r = 0→158 down-left.
+  Extended **backwards** (up-right) the line crosses the Space Needle saucer/shaft junction
+  (1150,556)→(1250,499), passes 23-38 px above the Leopold bust's red X eyes, and reaches the rune column
+  (glyph axis x = 1542) at **y = 333.8 (band 319-349)** — inside the rune word **`чёрный` = black**
+  (y 247-398, centre 322.5), 11 px from its centre; the neighbouring words are out of reach of the error
+  band (chance of hitting that word ≈ 15 %). Extended **forwards** (down-left, the direction the hand
+  points) it enters the Liberty plinth at (245,1068), i.e. just below the `ONLY real BITCOIN` course
+  (y 1046-1066), crosses the lower courses and leaves at (100,1150). So the 21-hand's line touches, in
+  order: the Needle (`food`), the rune word black, and — in its pointing direction — the pedestal that
+  carries the inserted word `real`. **Three candidates for slot 21 lie on one line**; `black`@21 (back-
+  extension) and `real`@21 (pointing direction) are both new readings. TOWER extended misses everything
+  notable; MOON extended grazes the bottom edge of the BLM tablet (0-4 px) and crosses the band inside
+  `odes`.
+* **Correction:** `PAY FOR THE FVTURE.` / `THIS IS THE FIRST PREDICTION.` is **not on the pedestal**. It is
+  a rotated ghost in the left margin (x 74-91 and 93-109, y 855-1045, read bottom-to-top), right of the
+  vertical address. The pedestal carries only `ONLY real BITCOIN` (top course, 6th from the ground) and
+  the 1-2-level ghost `ONLY BITCOIN` on the course at y 1078-1103. `real`@6 (six courses, word on the
+  sixth) stands; the 15-letter pairing was between two different objects.
+* **Correction:** the bottom band's mid-word split is **`n|odes`** (grey `…of n` to x 772, black `odes…`
+  from x 776), not `no|des`. Two ink levels only (black 2-25, grey 43-58 on a 63-70 background, 79
+  stroke segments, nothing in between). Grey words: 18, 19, 20a, 23-26 of 26; per-letter transitions at
+  73/85/97 of 115 — no period. Read alone the grey text is "majority of n … was the first received".
+* **Correction:** every rune-column separator is a **3-dot row** (y 59.5, 148.7, 247.0, 398.0, 450.7,
+  639.5, 910.7); the "2-dot" row at y 556 is two diacritic dots flanking a glyph. Glyph counts
+  1,5,4,6,2,8,11,5 as before. The earlier 3-vs-2 note is withdrawn.
+* **The clock dial has only 10 digits: 5 and 6 are absent** — solid Great Seal brickwork at (656,910) and
+  (646,1006). All ten present digits are one uniform grey; the dial runs clockwise, rotated ≈70° CCW,
+  not mirrored; hands at 1.41 h / 0.44 h / 10.32 h → 3, 13, 21.
+* Yellow network: exactly 4 boxes (116-186×55-137, 252-309×140-201, 381-446×93-175, 474-523×102-166), 4
+  segments (B1→B2→B3→B4→camera-1 lens at ≈(1320,93)); `Order and stability` is written on the last
+  segment. No fifth node.
+* A colour-only structure over the headline: a disc of round blobs, centre ≈(690,336), r ≈ 200, in an ink
+  with G−B = +3…+8 only (33,877 px) — a virion/splatter motif under the ghost lettering. Blob count is
+  threshold-dependent (16-95): **no number**. An undocumented dashed construction line runs
+  (1213,992)→(1302,966), pitch 18 px.
+* Negatives: no LSB/bit-plane structure (means 0.498-0.505, FFT noise-level); no year axis on the gold
+  chart (y labels 200…1800 only); no numerals on cameras, junction box, vial, pedestal or Needle; no
+  unrecorded coloured mark at any chroma; the Gravity Falls line is exactly 7 glyphs; the underdrawing
+  sweep over 16 tiles found no erased text.
+
+## Word-identity audit (agent, 2026-09-26 night) — what each element actually shows
+| pos | word | verdict | evidence |
+|---|---|---|---|
+| 1 | subject | keep | red-channel render: exactly two underlines, the `1` of Section 1 and `subject` |
+| 2 | camera | doubt → **twin** | both cameras are the same model; the Getty source is titled verbatim "Twin outdoor security camera, cctv" (keywords: cable, lens, security, shadow, two objects) |
+| 3 | tower | keep (written) | on a clock hand |
+| 4 | mask | doubt → face | yellow face-detection brackets; masks and faces equally salient |
+| 5 | police | keep | line 5 of 7 and the **only red line** (L4 blue, L5 red (121,44,54), L6 green) |
+| 6 | real | keep | the one lower-case word between two all-caps words on the pedestal |
+| 7 | liberty | keep | **no torch is drawn** — the raised arm belongs to the fist in the STOP roundel; 7 crown rays by radial scan |
+| 8 | black | plausible | `niger` in the 8-word Latin line; BLACK also written at BLM line 1 |
+| 9 | eye | keep | radiant eye; the CCTV box repeats the eye-in-triangle |
+| 10 | order | word fine, position external | cursive `Order and stability` runs from face-box 4 to camera 1's lens |
+| 12 | vote | doubt → question/debate | nothing written; the panel's only other red mark is the big `?` |
+| 14 | this | keep (medium) | written twice, both anomalous (graffiti; "THE THIS") |
+| 16 | rifle | doubt → gun/weapon | AR-15/M16-pattern line art, **no marking**; 16 is model identification only |
+| 17 | gold | keep (medium) | curve shape = gold monthly 2003-2020 on a 200-1800 axis |
+| 19 | glove | **change → hand** | bare-outlined hand with a `CVD19` vial: no cuff, wrist band or seam at 10x; the Bigstock source's 47 keywords include `hand, dose, doctor, nurse, patient, syringe` and **not** `glove` |
+| 20 | second | keep, flagged | nothing in the picture identifies Leopold; source tweet words: blood, canvas; XX = 20 |
+| 21 | food | word written, position external | `Food` down the elevator shaft; alternative: the unlabelled hand is the *second* hand → second@21 |
+Translation channel (if `niger`→black counts, so do these): `mundus`→**world**, `patria`→country,
+`causas`→cause, `bene`→good, `rerum`→thing, `cognoscere`→know — from the three substituted mottos.
+
+The agent also tested, on its own initiative: the tidy map with hand@19 (checksum False), ~20 single swaps
+and 5 doubles that pass the checksum (all derived on 301 paths x 2 key forms: none), and an identity frame
+of alternates per slot (1.12 G combos, 8,750,035 valid, 0 hits, 558 s). Its own caveat stands: positions
+8, 10, 15, 16, 17, 18, 20, 21 are all externally derived, so a wrong POSITION is at least as likely as a
+wrong word, and no word swap can fix that.
