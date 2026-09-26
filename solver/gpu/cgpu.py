@@ -29,24 +29,41 @@ os.environ.setdefault("BLM_PATHS", "n2")
 import blm, solve
 from gpu_proc import GPUProc
 
+UNC_FLAG = 0x40000000; PATH_MASK = 0x3fffffff      # same as gpu.py (not imported here: the parent never touches OpenCL)
+def hit_name(paths, v):
+    v = int(v); return paths[(v & PATH_MASK) - 1] + (" key=uncompressed" if v & UNC_FLAG else "")
+
 BLMC = os.path.join(SOLVER, "c", "blmc"); WORDLIST = os.path.join(SOLVER, "c", "english.txt")
 SLICE = 4096; GPU_INFLIGHT = 3; PARTS = 100
 TARGET = blm.TARGET_H160.hex()            # BLM_TARGET_H160 overrides (tests); the GPU kernel reads the same value
+# BLM_BLMC_ARGS: extra blmc flags appended to EVERY blmc call (search, --list-bin feed, fallback), e.g.
+#   "--nochecksum"  derive every combo (the feed then streams all combos, the kernel never checked checksums)
+#   "--paths ext"   the extra derivation paths - C engine only: the kernel is std, so the GPU side is
+#                   switched off and blmc takes all 100 parts (coverage over speed)
+EXTRA = os.environ.get("BLM_BLMC_ARGS", "").split()
+CPU_ONLY = "ext" in EXTRA
 
 
 def nwords(tmpl_path):
     return len(open(tmpl_path).read().split())
 
 
+def split_parts(share):
+    """-> (g_parts, gpu_part, cpu_part); g_parts == 0 when the GPU cannot cover what was asked for"""
+    g_parts = 0 if CPU_ONLY else max(1, min(PARTS - 1, int(round(share * PARTS))))
+    gpu_part = f"0..{g_parts - 1}/{PARTS}" if g_parts else "none"
+    return g_parts, gpu_part, f"{g_parts}..{PARTS - 1}/{PARTS}"
+
+
 def run(tmpl_path, passphrase=""):
     share = float(os.environ.get("BLM_GPU_SHARE", "0.46")); threads = int(os.environ.get("BLM_THREADS", "8"))
-    g_parts = max(1, min(PARTS - 1, int(round(share * PARTS))))
-    gpu_part = f"0..{g_parts - 1}/{PARTS}"; cpu_part = f"{g_parts}..{PARTS - 1}/{PARTS}"
-    print(f"[cgpu] gpu parts {gpu_part}  cpu parts {cpu_part}  cpu threads {threads}", flush=True)
+    g_parts, gpu_part, cpu_part = split_parts(share)
+    print(f"[cgpu] gpu parts {gpu_part}  cpu parts {cpu_part}  cpu threads {threads}"
+          f"{'  extra blmc args ' + ' '.join(EXTRA) if EXTRA else ''}{'  (GPU off: --paths ext is C only)' if CPU_ONLY else ''}", flush=True)
     t0 = time.time()
 
     # ---- CPU side: blmc search on its parts (stderr progress -> our stderr) ----
-    cpu_args = ["--passphrase", passphrase] if passphrase else []
+    cpu_args = (["--passphrase", passphrase] if passphrase else []) + EXTRA
     cpu = subprocess.Popen([BLMC, "--wordlist", WORDLIST, "--template", tmpl_path, "--part", cpu_part,
                             "--threads", str(threads), "--naddr", "2", "--target", TARGET] + cpu_args,
                            cwd=SOLVER, stderr=subprocess.PIPE, text=True)
@@ -65,9 +82,10 @@ def run(tmpl_path, passphrase=""):
     gpu_seeds = 0; gpu_fed = 0; hits = 0; gpu_err = None; gpu_done_at = None
     g = None
     try:
+        if not g_parts: raise StopIteration          # nothing for the GPU: skip straight to the CPU wait
         g = GPUProc(mode="narrow", n_addr=2, passphrase=passphrase)
         lister = subprocess.Popen([BLMC, "--wordlist", WORDLIST, "--template", tmpl_path, "--list-bin",
-                                   "--part", gpu_part, "--threads", "1"], stdout=subprocess.PIPE, bufsize=1 << 20)
+                                   "--part", gpu_part, "--threads", "1"] + EXTRA, stdout=subprocess.PIPE, bufsize=1 << 20)
         jobs = {}
         def reap(block=False):
             nonlocal gpu_seeds, hits
@@ -75,7 +93,7 @@ def run(tmpl_path, passphrase=""):
                 arr = jobs.pop(jid); gpu_seeds += len(arr)
                 for j in np.nonzero(res)[0]:
                     tag = f"[gpu-n2]{' passphrase=' + repr(passphrase) if passphrase else ''}"
-                    solve.record(" ".join(blm.WORDLIST[i] for i in arr[j]), g.paths[int(res[j]) - 1], tag); hits += 1
+                    solve.record(" ".join(blm.WORDLIST[i] for i in arr[j]), hit_name(g.paths, res[j]), tag); hits += 1
         def status():
             el = max(time.time() - t0, 1e-9)
             c = re.search(r"(\d+) seeds\s+(\d+) seeds/s", cpu_stat["line"])
@@ -104,6 +122,8 @@ def run(tmpl_path, passphrase=""):
         if lister.returncode != 0: raise RuntimeError(f"blmc --list-bin exited {lister.returncode}")
         if gpu_seeds != gpu_fed: raise RuntimeError(f"gpu processed {gpu_seeds} of {gpu_fed} fed")
         gpu_done_at = time.time() - t0         # the GPU is idle from here until the CPU catches up
+    except StopIteration:
+        pass
     except Exception as e:                     # any GPU-side failure: the CPU redoes those parts
         gpu_err = e; print(f"\n[cgpu] GPU side failed ({e!r}); parts {gpu_part} will be re-run on the CPU", flush=True)
     finally:
@@ -150,16 +170,16 @@ def run_passphrases(tmpl_path, passfile):
     Passphrases longer than GPU.MAX_PASS bytes are left to the CPU, which has no such limit."""
     share = float(os.environ.get("BLM_GPU_SHARE", "0.46")); threads = int(os.environ.get("BLM_THREADS", "8"))
     pws = [l.rstrip("\n") for l in open(passfile, encoding="utf-8") if l.strip()]
-    g_parts = max(1, min(PARTS - 1, int(round(share * PARTS))))
-    gpu_part = f"0..{g_parts - 1}/{PARTS}"; cpu_part = f"{g_parts}..{PARTS - 1}/{PARTS}"
+    g_parts, gpu_part, cpu_part = split_parts(share)
     print(f"[cgpu] passphrase sweep: {len(pws)} passphrases x {os.path.basename(tmpl_path)}  "
-          f"gpu parts {gpu_part}  cpu parts {cpu_part}  cpu threads {threads}", flush=True)
+          f"gpu parts {gpu_part}  cpu parts {cpu_part}  cpu threads {threads}"
+          f"{'  extra blmc args ' + ' '.join(EXTRA) if EXTRA else ''}{'  (GPU off: --paths ext is C only)' if CPU_ONLY else ''}", flush=True)
     t0 = time.time()
 
     # ---- CPU side: one process for the whole sweep ----
     cpu = subprocess.Popen([BLMC, "--wordlist", WORDLIST, "--template", tmpl_path, "--part", cpu_part,
                             "--threads", str(threads), "--naddr", "2", "--target", TARGET,
-                            "--passfile", passfile], cwd=SOLVER, stderr=subprocess.PIPE, text=True)
+                            "--passfile", passfile] + EXTRA, cwd=SOLVER, stderr=subprocess.PIPE, text=True)
     cpu_stat = {"line": ""}
     def cpu_reader():
         buf = ""
@@ -174,6 +194,7 @@ def run_passphrases(tmpl_path, passfile):
     # ---- GPU side ----
     gpu_seeds = 0; hits = 0; gpu_err = None; g = None; gpu_done = []
     try:
+        if not g_parts: raise StopIteration
         import gpu as _gpu
         long_pw = [p for p in pws if len(p.encode()) > _gpu.GPU.MAX_PASS]
         gpu_pws = [p for p in pws if len(p.encode()) <= _gpu.GPU.MAX_PASS]
@@ -183,7 +204,7 @@ def run_passphrases(tmpl_path, passfile):
         # enumerate the GPU's parts once - the survivor set is passphrase-independent
         nw = nwords(tmpl_path)
         r = subprocess.run([BLMC, "--wordlist", WORDLIST, "--template", tmpl_path, "--list-bin",
-                            "--part", gpu_part, "--threads", "1"], stdout=subprocess.PIPE, check=True)
+                            "--part", gpu_part, "--threads", "1"] + EXTRA, stdout=subprocess.PIPE, check=True)
         if len(r.stdout) % (2 * nw): raise RuntimeError("blmc --list-bin ended mid-record")
         survivors = np.frombuffer(r.stdout, dtype="<u2").reshape(-1, nw)
         print(f"[cgpu] gpu parts enumerated once: {len(survivors):,} survivors "
@@ -196,7 +217,7 @@ def run_passphrases(tmpl_path, passfile):
             for jid, res in g.collect(timeout=0.05 if block else 0):
                 arr, pw = jobs.pop(jid); gpu_seeds += len(arr)
                 for j in np.nonzero(res)[0]:
-                    solve.record(" ".join(blm.WORDLIST[i] for i in arr[j]), g.paths[int(res[j]) - 1],
+                    solve.record(" ".join(blm.WORDLIST[i] for i in arr[j]), hit_name(g.paths, res[j]),
                                  f"[gpu-n2] passphrase={pw!r}"); hits += 1
         for pi, pw in enumerate(gpu_pws, 1):
             while jobs: reap(block=True)            # drain before the salt changes
@@ -212,6 +233,8 @@ def run_passphrases(tmpl_path, passfile):
                                  f"| {cpu_stat['line'][:70]}   ")
         while jobs: reap(block=True)
         gpu_done.append(time.time() - t0)
+    except StopIteration:
+        pass
     except Exception as e:
         gpu_err = e
         print(f"\n[cgpu] GPU side failed ({e!r}); parts {gpu_part} will be re-run on the CPU", flush=True)
@@ -226,7 +249,7 @@ def run_passphrases(tmpl_path, passfile):
     if gpu_err is not None:                       # coverage guarantee: the CPU redoes the GPU parts
         r = subprocess.run([BLMC, "--wordlist", WORDLIST, "--template", tmpl_path, "--part", gpu_part,
                             "--threads", str(threads), "--naddr", "2", "--target", TARGET,
-                            "--passfile", passfile], cwd=SOLVER, stderr=subprocess.PIPE, text=True)
+                            "--passfile", passfile] + EXTRA, cwd=SOLVER, stderr=subprocess.PIPE, text=True)
         m = re.search(r"done in [\d.]+s: \d+ combos, (\d+) seeds", r.stderr); cpu_seeds += int(m.group(1)) if m else 0
         print(r.stderr.strip().split("\n")[-1], flush=True)
     el = time.time() - t0; total = gpu_seeds + cpu_seeds

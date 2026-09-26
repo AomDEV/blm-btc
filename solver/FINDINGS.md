@@ -406,3 +406,12 @@ hybrid's 5,994. Details, the four-run table and the validation list are in SWEEP
 
 Rebuild with `c/build.sh` after any change and run `python3 c/test_blmc.py` (must print
 ALL PASS on both builds) before trusting a run.
+
+## Checker audit (2026-09-26): the engine now tests both key forms; checksum-free and extra-path runs exist
+Asked whether a run could have enumerated the right phrase and still missed it. Answer, with the
+wallet behaviour that backs each line, is in SWEEP.md ("what the checker itself could miss"). In
+short: uncompressed keys are now tested on every run (free); `--nochecksum` covers a phrase whose
+BIP39 checksum is invalid (Electrum's BIP39 import accepts those, iancoleman does not); `--paths ext`
+covers the plausible non-BIP44 legacy paths at 1.83x cost; passphrase sweeps had never actually been
+run and are now first in `queue3.lst`. Electrum's native seed scheme and brainwallets are noted as
+open, not built.

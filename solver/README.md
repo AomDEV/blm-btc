@@ -21,15 +21,29 @@ The 11 OpenCL base kernels are vendored in `gpu/cl/`, so there is no external ch
     ./stop.sh --orphans                                         # sweep stray ppid-1 workers
     tr '\r' '\n' < logs/NAME.log | tail -3                      # progress; hits -> solver/HIT.txt
 
-To run a queue of frames, loop over them (there is no batch driver any more — the C engine
-replaced the Python one):
+To run a queue of frames, put one command per line in a list and run it inside one job:
 
-    for t in t21f3 t21p t21q; do ./run.sh $t python3 gpu/cgpu.py $t.txt; while [ -f logs/$t.pid ] \
-      && kill -0 $(cat logs/$t.pid) 2>/dev/null; do sleep 30; done; done
+    ./run.sh q3 ./queue.sh queue3.lst        # sequential; stop.sh q3 kills the whole queue
+    grep "=== \[" logs/q3.log                # one START/END line per entry, with wall time
 
 Env: `BLM_THREADS` (default 8 — set to the core count), `BLM_GPU_SHARE` (default 0.46 — the
 fraction of the space given to the GPU; **machine-specific**, see below), `BLM_TARGET_H160`
-(tests only), `BLM_CL_DIR` (override the kernel directory). Paths searched: m/44'/0'/0'/0/{0,1}.
+(tests only), `BLM_CL_DIR` (override the kernel directory), `BLM_BLMC_ARGS` (extra blmc flags
+appended to every blmc call, see "Coverage" below).
+
+## Coverage: what a run tests, and the switches that widen it
+Default: paths m/44'/0'/0'/0/{0,1}, **compressed and uncompressed** pubkey hash160 for each
+(uncompressed costs 0.6 %; a hit says `key=uncompressed`), BIP39-checksum-valid phrases only,
+empty passphrase. The audit of these assumptions and the wallet behaviour behind them is in
+SWEEP.md ("what the checker itself could miss"). Widening switches, all through `BLM_BLMC_ARGS`:
+
+    BLM_BLMC_ARGS="--nochecksum" python3 gpu/cgpu.py T.txt   # derive EVERY combo (Electrum's BIP39
+                                                            # import accepts invalid checksums): 128x the work
+    BLM_BLMC_ARGS="--paths ext"  python3 gpu/cgpu.py T.txt   # + m/44'/0'/0'/1/i, m/44'/0'/1'/0/i, m/0'/0/i,
+                                                            # m/0/i, m, m/0'/0'/0'  (1.83x; C only, GPU is
+                                                            # switched off because the kernel is std)
+    T.txt@passlist.txt                                      # passphrase sweep (one enumeration pass)
+    --compressed-only                                       # the pre-audit behaviour, for A/B only
 
 `BLM_GPU_SHARE` matters: too high and the GPU gates the whole run. Every `cgpu.py` run ends with
 
@@ -39,7 +53,8 @@ so one run is enough to tune a new machine.
 
 ## Template syntax
 Fixed word | `?` (any of 2048) | `{a|b|c}`. Current frames: `t21*.txt`, `pp.txt`, `pq.txt`
-(21-word frames over the position map); `queue2.lst` is the pending run order.
+(21-word frames over the position map); `queue3.lst` is the coverage re-run order (ext paths,
+passphrase sweeps, checksum-free), `queue2.lst` the older word-frame order (not yet run).
 `blmc --count --template T` gives the checksum-valid count before committing to a run.
 
 ## The engines, and where the time goes

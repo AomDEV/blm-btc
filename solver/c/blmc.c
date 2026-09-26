@@ -18,6 +18,14 @@
  *                                    SINGLE enumeration pass (vs one full re-run per passphrase)
  *   --part b/n | --part b..c/n       work only on parts b (to c) of the combo space split into n
  *                                    equal parts (cgpu.py gives the GPU some parts, the CPU the rest)
+ *   --nochecksum                     derive EVERY combo, not only BIP39-checksum-valid ones (a wallet
+ *                                    that imports a mnemonic without enforcing the checksum, e.g.
+ *                                    Electrum's BIP39 import, accepts such phrases). 2^CS x the work.
+ *   --compressed-only                default is to test the hash160 of BOTH the compressed (02/03)
+ *                                    and the uncompressed (04) pubkey; a hit says key=uncompressed
+ *   --paths std|ext                  std (default): m/44'/0'/0'/0/i, i < naddr. ext adds, per seed,
+ *                                    m/44'/0'/0'/1/i, m/44'/0'/1'/0/i, m/0'/0/i, m/0/i, m, m/0'/0'/0'
+ *                                    (~1.8x the per-seed cost; C engine only, the GPU kernel is std)
  *   blmc --selftest                  SHA-512 / PBKDF2 fast paths vs OpenSSL
  *   blmc --bench [--template T]      per-component cost on one core (PBKDF2 x1/x2/x4, EC, enumerator)
  *
@@ -141,6 +149,14 @@ static int pubkey33(secp256k1_context *ctx, const uint8_t k[32], uint8_t out[33]
     secp256k1_pubkey pk; size_t L = 33;
     if (!secp256k1_ec_pubkey_create(ctx, &pk, k)) return 0;
     secp256k1_ec_pubkey_serialize(ctx, out, &L, &pk, SECP256K1_EC_COMPRESSED);
+    return 1;
+}
+/* both serialisations of one pubkey: the EC mult is paid once, the 65-byte form is a copy */
+static int pubkey_both(secp256k1_context *ctx, const uint8_t k[32], uint8_t c33[33], uint8_t u65[65]) {
+    secp256k1_pubkey pk; size_t L = 33;
+    if (!secp256k1_ec_pubkey_create(ctx, &pk, k)) return 0;
+    secp256k1_ec_pubkey_serialize(ctx, c33, &L, &pk, SECP256K1_EC_COMPRESSED);
+    L = 65; secp256k1_ec_pubkey_serialize(ctx, u65, &L, &pk, SECP256K1_EC_UNCOMPRESSED);
     return 1;
 }
 /* normal CKD from a parent whose serialized pubkey the caller already has. Every leaf under
@@ -296,6 +312,8 @@ static void load_passfile(const char *path) {
 /* ---------------------------------------------------------------- search */
 static uint8_t target[20];
 static int NADDR = 2;
+static int UNC = 1;      /* also test the hash160 of the UNCOMPRESSED pubkey (--compressed-only turns it off) */
+static int NOCHK = 0;    /* --nochecksum: derive every combo, not only the BIP39-checksum-valid ones */
 static atomic_ullong combos_done = 0, seeds_done = 0;
 static atomic_int stop_flag = 0, hits = 0;
 static pthread_mutex_t hit_mu = PTHREAD_MUTEX_INITIALIZER;
@@ -307,31 +325,71 @@ static int list_mode = 0;
 static atomic_ullong next_chunk = 0;
 static uint64_t CHUNK = 1 << 16, G_LO = 0, G_HI = 0;
 
-static void report_hit(const char *mn, int i, const char *pw) {
-    char tail[600] = "";
-    if (pw && *pw) snprintf(tail, sizeof tail, " passphrase='%s'", pw);
+static void report_hit(const char *mn, const char *path, const char *pw, int unc) {
+    char tail[640] = "";
+    size_t o = 0;
+    if (unc) o += (size_t)snprintf(tail + o, sizeof tail - o, " key=uncompressed");
+    if (pw && *pw) snprintf(tail + o, sizeof tail - o, " passphrase='%s'", pw);
     pthread_mutex_lock(&hit_mu);
-    printf("\n*** HIT *** '%s' path=m/44h/0h/0h/0/%d%s [blmc]\n", mn, i, tail); fflush(stdout);
+    printf("\n*** HIT *** '%s' path=%s%s [blmc]\n", mn, path, tail); fflush(stdout);
     const char *hf = getenv("BLM_HIT_FILE");            /* tests redirect; default is cwd/HIT.txt */
     FILE *f = fopen(hf && *hf ? hf : "HIT.txt", "a");
-    if (f) { fprintf(f, "*** HIT *** '%s' path=m/44h/0h/0h/0/%d%s [blmc]\n", mn, i, tail); fclose(f); }
+    if (f) { fprintf(f, "*** HIT *** '%s' path=%s%s [blmc]\n", mn, path, tail); fclose(f); }
     atomic_fetch_add(&hits, 1);
     atomic_store(&stop_flag, 1);
     pthread_mutex_unlock(&hit_mu);
 }
 
+/* test one private key: hash160 of the compressed pubkey, then (UNC) of the uncompressed one.
+ * pfx is the path text; i >= 0 is appended to it ("m/44h/0h/0h/0/" + 1), i < 0 means pfx is complete. */
+static int test_key(secp256k1_context *ctx, const uint8_t k[32], const char *mn, const char *pw, const char *pfx, int i) {
+    uint8_t pub[33], upub[65], h[20]; char path[64];
+    if (!pubkey_both(ctx, k, pub, upub)) return 0;
+    hash160(pub, 33, h);
+    int unc = 0;
+    if (memcmp(h, target, 20) != 0) {
+        if (!UNC) return 0;
+        hash160(upub, 65, h);                         /* same point, 04||x||y: one more hash160, no EC work */
+        if (memcmp(h, target, 20) != 0) return 0;
+        unc = 1;
+    }
+    if (i >= 0) snprintf(path, sizeof path, "%s%d", pfx, i); else snprintf(path, sizeof path, "%s", pfx);
+    report_hit(mn, path, pw, unc);
+    return 1;
+}
+
+/* The extra derivations of --paths ext (each leaf i < NADDR, compressed + uncompressed):
+ *   m/44'/0'/0'/1/i   BIP44 change chain           m/44'/0'/1'/0/i   BIP44 account 1
+ *   m/0'/0/i          BIP32 default (BRD, MultiBit HD, early Copay/Bitcoin Wallet)
+ *   m/0/i             bare BIP32 root chain (bip32.org, some scripts)
+ *   m                 the master key itself         m/0'/0'/0'        Bitcoin Core style hardened
+ * Costs ~14 extra EC mults per seed on top of the default 4, so ~1.8x the per-seed time. */
+static int EXT = 0;
+
 /* derive m/44'/0'/0'/0/i for i < NADDR from one seed and compare with the target */
 static void check_seed(secp256k1_context *ctx, const uint8_t seed[64], const char *mn, const char *pw) {
-    xkey chain; uint8_t cpub[33], pub[33], h[20];
-    if (!account_chain(ctx, seed, &chain)) return;
+    xkey m, a, b, acct, chain, t, u; uint8_t cpub[33];
+    master_from_seed(seed, &m);
+    if (!ckd_hard(ctx, &m, 44, &a) || !ckd_hard(ctx, &a, 0, &b) || !ckd_hard(ctx, &b, 0, &acct)) return;
+    if (!ckd_normal(ctx, &acct, 0, &chain)) return;
     if (!pubkey33(ctx, chain.k, cpub)) return;        /* once; every leaf reuses it */
     for (int i = 0; i < NADDR; i++) {
         xkey leaf;
         if (!ckd_normal_pub(ctx, &chain, cpub, (uint32_t)i, &leaf)) continue;
-        if (!pubkey33(ctx, leaf.k, pub)) continue;
-        hash160(pub, 33, h);
-        if (memcmp(h, target, 20) == 0) { report_hit(mn, i, pw); return; }
+        if (test_key(ctx, leaf.k, mn, pw, "m/44h/0h/0h/0/", i)) return;
     }
+    if (!EXT) return;
+    if (ckd_normal(ctx, &acct, 1, &t) && pubkey33(ctx, t.k, cpub))                                   /* m/44'/0'/0'/1/i */
+        for (int i = 0; i < NADDR; i++) if (ckd_normal_pub(ctx, &t, cpub, (uint32_t)i, &u) && test_key(ctx, u.k, mn, pw, "m/44h/0h/0h/1/", i)) return;
+    if (ckd_hard(ctx, &b, 1, &t) && ckd_normal(ctx, &t, 0, &u) && pubkey33(ctx, u.k, cpub))          /* m/44'/0'/1'/0/i */
+        for (int i = 0; i < NADDR; i++) if (ckd_normal_pub(ctx, &u, cpub, (uint32_t)i, &t) && test_key(ctx, t.k, mn, pw, "m/44h/0h/1h/0/", i)) return;
+    if (ckd_hard(ctx, &m, 0, &t) && ckd_normal(ctx, &t, 0, &u) && pubkey33(ctx, u.k, cpub))          /* m/0'/0/i */
+        for (int i = 0; i < NADDR; i++) if (ckd_normal_pub(ctx, &u, cpub, (uint32_t)i, &t) && test_key(ctx, t.k, mn, pw, "m/0h/0/", i)) return;
+    if (ckd_normal(ctx, &m, 0, &t) && pubkey33(ctx, t.k, cpub))                                      /* m/0/i */
+        for (int i = 0; i < NADDR; i++) if (ckd_normal_pub(ctx, &t, cpub, (uint32_t)i, &u) && test_key(ctx, u.k, mn, pw, "m/0/", i)) return;
+    if (test_key(ctx, m.k, mn, pw, "m", -1)) return;                                                 /* m */
+    if (ckd_hard(ctx, &m, 0, &t) && ckd_hard(ctx, &t, 0, &u) && ckd_hard(ctx, &u, 0, &t))            /* m/0'/0'/0' */
+        if (test_key(ctx, t.k, mn, pw, "m/0h/0h/0h", -1)) return;
 }
 
 /* One lane = one (mnemonic, passphrase) pair. With no --passfile there is a single passphrase and
@@ -372,7 +430,7 @@ static void *worker(void *arg) {
         memcpy(buf, fixedbuf, 33);
         for (int j = 0; j < NFREE; j++) put11(buf, 11 * freeslot[j], slots[freeslot[j]].idx[digit[j]]);
         for (; c < end; c++) {
-            if (checksum_ok(buf)) {
+            if (NOCHK || checksum_ok(buf)) {
                 if (list_mode == 1) { build_mnemonic(buf, mn); pthread_mutex_lock(&hit_mu); puts(mn); pthread_mutex_unlock(&hit_mu); valid++; }
                 else if (list_mode == 2) valid++;
                 else if (list_mode == 3) {       /* raw uint16 indices: no formatting, no parsing */
@@ -598,9 +656,28 @@ static void derive_mode(void) {
         uint8_t cpub[33];
         if (!pubkey33(ctx, chain.k, cpub)) { printf("invalid\n"); continue; }
         for (int i = 0; i < NADDR; i++) {
-            xkey leaf; uint8_t pub[33], h[20];
-            if (!ckd_normal_pub(ctx, &chain, cpub, (uint32_t)i, &leaf) || !pubkey33(ctx, leaf.k, pub)) { printf("addr %d invalid\n", i); continue; }
+            xkey leaf; uint8_t pub[33], upub[65], h[20];
+            if (!ckd_normal_pub(ctx, &chain, cpub, (uint32_t)i, &leaf) || !pubkey_both(ctx, leaf.k, pub, upub)) { printf("addr %d invalid\n", i); continue; }
             hash160(pub, 33, h); hex(h, 20, hx); printf("addr %d %s\n", i, hx);
+            hash160(upub, 65, h); hex(h, 20, hx); printf("uaddr %d %s\n", i, hx);
+        }
+        if (EXT) {   /* the --paths ext derivations, for the differential test: "ext PATH chex uhex" */
+            xkey a, b, acct, t, u; uint8_t pub[33], upub[65], h[20]; char hu[41];
+            struct { const char *name; int ok; xkey k; } ex[16]; int ne = 0;
+            if (ckd_hard(ctx, &m, 44, &a) && ckd_hard(ctx, &a, 0, &b) && ckd_hard(ctx, &b, 0, &acct)) {
+                static char nm[64][32];
+                if (ckd_normal(ctx, &acct, 1, &t)) for (int i = 0; i < NADDR && ne < 14; i++) if (ckd_normal(ctx, &t, (uint32_t)i, &u)) { snprintf(nm[ne], 32, "m/44h/0h/0h/1/%d", i); ex[ne].name = nm[ne]; ex[ne++].k = u; }
+                if (ckd_hard(ctx, &b, 1, &t) && ckd_normal(ctx, &t, 0, &u)) for (int i = 0; i < NADDR && ne < 14; i++) if (ckd_normal(ctx, &u, (uint32_t)i, &t)) { snprintf(nm[ne], 32, "m/44h/0h/1h/0/%d", i); ex[ne].name = nm[ne]; ex[ne++].k = t; }
+                if (ckd_hard(ctx, &m, 0, &t) && ckd_normal(ctx, &t, 0, &u)) for (int i = 0; i < NADDR && ne < 14; i++) if (ckd_normal(ctx, &u, (uint32_t)i, &t)) { snprintf(nm[ne], 32, "m/0h/0/%d", i); ex[ne].name = nm[ne]; ex[ne++].k = t; }
+                if (ckd_normal(ctx, &m, 0, &t)) for (int i = 0; i < NADDR && ne < 14; i++) if (ckd_normal(ctx, &t, (uint32_t)i, &u)) { snprintf(nm[ne], 32, "m/0/%d", i); ex[ne].name = nm[ne]; ex[ne++].k = u; }
+                ex[ne].name = "m"; ex[ne++].k = m;
+                if (ckd_hard(ctx, &m, 0, &t) && ckd_hard(ctx, &t, 0, &u) && ckd_hard(ctx, &u, 0, &t)) { ex[ne].name = "m/0h/0h/0h"; ex[ne++].k = t; }
+            }
+            for (int e = 0; e < ne; e++) {
+                if (!pubkey_both(ctx, ex[e].k.k, pub, upub)) continue;
+                hash160(pub, 33, h); hex(h, 20, hx); hash160(upub, 65, h); hex(h, 20, hu);
+                printf("ext %s %s %s\n", ex[e].name, hx, hu);
+            }
         }
         printf("end\n");
     }
@@ -625,6 +702,12 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--count")) count = 1;
         else if (!strcmp(argv[i], "--passphrase") && i + 1 < argc) passphrase = argv[++i];
         else if (!strcmp(argv[i], "--passfile") && i + 1 < argc) passfile = argv[++i];
+        else if (!strcmp(argv[i], "--compressed-only")) UNC = 0;
+        else if (!strcmp(argv[i], "--paths") && i + 1 < argc) {
+            const char *p = argv[++i];
+            if (!strcmp(p, "ext")) EXT = 1; else if (!strcmp(p, "std")) EXT = 0; else die("--paths wants std or ext");
+        }
+        else if (!strcmp(argv[i], "--nochecksum")) NOCHK = 1;
         else if (!strcmp(argv[i], "--selftest")) return selftest();
         else if (!strcmp(argv[i], "--bench")) bench = 1;
         else if (!strcmp(argv[i], "--part") && i + 1 < argc) {
@@ -650,8 +733,9 @@ int main(int argc, char **argv) {
     parse_template(tmpl);
     uint64_t N = space_size();
     if (count || list_mode) { threads = count ? threads : 1; }   /* --list/--list-bin: one ordered pass */
-    if (!list_mode) fprintf(stderr, "blmc: %d words, %d free slots, %llu combos, checksum %d bits, %d threads, naddr %d%s\n",
-                            NW, NFREE, (unsigned long long)N, CS, threads, NADDR, "");
+    if (!list_mode) fprintf(stderr, "blmc: %d words, %d free slots, %llu combos, checksum %d bits%s, %d threads, naddr %d, %s keys, paths %s\n",
+                            NW, NFREE, (unsigned long long)N, CS, NOCHK ? " IGNORED (--nochecksum)" : "", threads, NADDR,
+                            UNC ? "compressed+uncompressed" : "compressed-only", EXT ? "ext (m/44h/0h/0h/{0,1}/i, m/44h/0h/1h/0/i, m/0h/0/i, m/0/i, m, m/0h/0h/0h)" : "std (m/44h/0h/0h/0/i)");
     if (passfile && !list_mode) fprintf(stderr, "blmc: %d passphrases from %s - one enumeration pass, "
                                                 "every survivor tested against all of them\n", NPASS, passfile);
     if (count) list_mode = 0;
@@ -665,7 +749,7 @@ int main(int argc, char **argv) {
     G_LO = glo; G_HI = ghi; atomic_store(&next_chunk, 0);
     /* ~256 checksum-valid seeds per chunk (survival is 2^-CS), but at least 16 chunks per thread
      * so the tail cannot leave a fast core idle, and never below 1024 combos of odometer work. */
-    CHUNK = (uint64_t)256 << CS;
+    CHUNK = NOCHK ? 256 : (uint64_t)256 << CS;      /* with --nochecksum every combo survives */
     if (CHUNK < 1024) CHUNK = 1024;
     uint64_t maxc = N / ((uint64_t)threads * 16);
     if (maxc && CHUNK > maxc) CHUNK = maxc;

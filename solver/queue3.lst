@@ -1,0 +1,36 @@
+# queue3 - coverage re-runs after the 2026-09-26 engine audit (see SWEEP.md "What the checker could miss").
+# Every entry now tests compressed AND uncompressed keys. Ordered by (prior x coverage gain) / cost.
+# Times are for the M1 (8 threads + GPU); the M4 is ~2.5x faster. Run with: ./run.sh q3 ./queue.sh queue3.lst
+
+# 1. extended paths on the small 4-slot frames (~1-2 min each on the M1)
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21f.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py pp.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py pq.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21j.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21k.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21l.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21m.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21n.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21o.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21t.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21u.txt
+
+# 2. passphrase sweeps (single enumeration pass, both engines) - never run before (~20 min)
+python3 -u gpu/cgpu.py t21f.txt@passlist.txt
+python3 -u gpu/cgpu.py pp.txt@passlist_top.txt
+python3 -u gpu/cgpu.py pq.txt@passlist_top.txt
+
+# 3. checksum-free (Electrum-import style) on the 4-slot frames: 128x the derivations (~1 h each)
+BLM_BLMC_ARGS="--nochecksum" python3 -u gpu/cgpu.py t21f.txt
+BLM_BLMC_ARGS="--nochecksum" python3 -u gpu/cgpu.py pp.txt
+BLM_BLMC_ARGS="--nochecksum" python3 -u gpu/cgpu.py pq.txt
+
+# 4. extended paths on the 5-slot 89-pool frames (~1.5 h each)
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21g.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21h.txt
+
+# 5. the older frames (black@8 fixed, 36/20/60/47 pools), now with ext paths + uncompressed (~1 h total)
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21d.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21c.txt
+BLM_BLMC_ARGS="--paths ext" python3 -u gpu/cgpu.py t21b.txt

@@ -141,16 +141,23 @@ static void normal_child_with_pub(extended_private_key_t *parent, uchar *ppub33,
   memcpy_offset(&child->chain_code, &hmacsha512_result, 32, 32);
 }
 
-// hash160 of the compressed pubkey of k; returns p+1 / FLAG|(p+1) / 0
+// hash160 of the compressed AND the uncompressed pubkey of k (one EC mult, two serialisations).
+// returns p+1 (compressed hit) / UNC_FLAG|(p+1) (uncompressed hit) / CANARY_FLAG|(p+1) / 0
+#define UNC_FLAG 0x40000000u
 static uint test_key(extended_private_key_t *k, uchar *tgt, uchar *cn, uint p) {
   extended_public_key_t pub;
   public_from_private(k, &pub);
-  uchar ser[33];
+  // sha256() below reads its input as whole uints, so the bytes after 33 / 65 must be defined zeros
+  uchar ser[68];
+  for (int j = 0; j < 68; j++) ser[j] = 0;
   serialized_public_key(&pub, ser);
   uchar h[20];
   hash160(ser, 33, (char *)h);
   if (eq20(h, tgt)) return p + 1;
   if (eq20(h, cn)) return 0x80000000u | (p + 1);
+  uncompressed_public_key(&pub, ser);
+  hash160(ser, 65, (char *)h);
+  if (eq20(h, tgt)) return UNC_FLAG | (p + 1);
   return 0;
 }
 

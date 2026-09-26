@@ -975,3 +975,48 @@ face's spectacles), `lens`, `cable`, `box` (the CCTV set), `hair`, `face`, `nose
 `torch`, `spray`, `wall`, `shadow` (only the cameras cast one), `mirror`/`reflect`/`flip`
 (the mirrored seal and .VS.), `pole`, `ribbon`, `wire`, `map`… 84 such words added: the
 free-slot pool is now 206 words (`t21f3`, `t21p/q/v/w/y/z` rebuilt on it, ~13 min each).
+
+---
+
+# 2026-09-26 (evening) — audit: what the checker itself could miss, and what was done about it
+
+Question asked: could the search already have enumerated the right phrase and not reported it, because
+of an assumption in the checker rather than in the words? Every assumption was listed, checked against
+how 2020 wallet tools actually behave (sources fetched), and either closed or priced.
+
+| assumption in the engine | who would break it | prior | cost to remove | status |
+|---|---|---|---|---|
+| compressed pubkey only | no BIP32 wallet (BIP32 defines children over compressed keys); hand-rolled scripts, and the community's own `BLM_generate_BIP39_pk.py`, test BOTH forms | low | **+0.6 %** (one extra hash160, same EC point) | **closed: default on in both engines**; hits say `key=uncompressed` |
+| only BIP39-checksum-valid phrases | **Electrum** "BIP39 seed" import accepts any non-empty text: its Next button is gated by `lambda x: bool(x)` once the BIP39 box is ticked, "checksum: failed" is only a label (seed_dialog.py 3.3.8/4.0.4, issue #6860); Trezor `python-mnemonic.to_seed` never checks either. iancoleman's page refuses ("Invalid mnemonic"), so an iancoleman author is safe | medium — the author *chose* 21 words for meaning, and only 1 in 128 hand-picked phrases passes the checksum unless the last word is bent to fit | **128x** the derivations: a 4-slot 89-pool frame becomes 62.7 M derivations (~1 h on the M1, ~25 min on the M4); 5-slot frames are out of reach | **closed for the small frames: `--nochecksum`**, queued (queue3 §3) |
+| path m/44'/0'/0'/0/{0,1} | BRD `m/0'/0/i`; bip32.org / scripts `m/0/i`; the change chain; account 1; the raw master; Core-style `m/0'/0'/0'`. The picture itself argues for BIP44 (44 stars, "ONLY real BITCOIN" = coin 0, "FIRST") | low | **1.83x** per seed (8,689 vs 15,914 seeds/s on the M1; 14 extra EC mults) | **closed on demand: `--paths ext`** (C only, the kernel stays std; cgpu switches the GPU off), queued for every frame already searched |
+| empty passphrase | the runes spell TUESDAY through the Gravity Falls key, a channel the words never use; dates, slogans, BLM, X | medium-high | one pass per frame with `--passfile` (49 phrases x 490 k survivors = 24 M derivations, ~20 min) | **never run until now**; queued first among the long items (queue3 §2) |
+| Electrum's *native* seed (salt `electrum`, `m/0/i`, HMAC "Seed version" prefix `01` instead of a checksum) | an author who typed 21 words into a fresh Electrum "standard" wallet — Electrum generates 12 but `is_new_seed` has no word-count check, so a 21-word text whose HMAC starts with `01` is accepted | low | new mode: different salt, different filter (1/256 survive), path `m/0/i` | **open**; noted, not built |
+| brainwallet (`sha256(sentence)` as the key) | pre-HD habit; cheap per phrase but there is no checksum filter, so it is 128x too | low | 128x, like `--nochecksum`, times two key forms | **open**; noted, not built |
+| 21 words | 24-word readings exist (Leopold II + XX = 22, graffiti 19+5 = 24) | see FINDINGS | new frames | unchanged |
+
+Other facts fetched for this audit (agent, sources in the transcript): Electrum's BIP39 import offers
+`m/44'/0'/0'` legacy first in the list but pre-selects **native segwit** (`default_choice_idx = 2`), so
+an Electrum author had to pick legacy deliberately — consistent with a 1-address that was meant to be
+one; iancoleman defaults to BIP44 `m/44'/0'/0'/0`, compressed, legacy, and has the "BIP39 Passphrase"
+field; Coinomi / Blockchain.com / Bitcoin.com / Samourai / Atomic use `m/44'/0'/0'`; BRD uses `m/0'`.
+
+## Engine changes (all under test)
+* `blmc`: `test_key()` hashes the compressed and the uncompressed serialisation of the same point;
+  `--compressed-only` restores the old behaviour. `--nochecksum` bypasses `checksum_ok` (chunking
+  adjusted: every combo survives). `--paths ext` adds `m/44'/0'/0'/1/i`, `m/44'/0'/1'/0/i`, `m/0'/0/i`,
+  `m/0/i`, `m`, `m/0'/0'/0'` (i < naddr). Hit lines now print the full path text.
+* kernel `blm.cl`: `test_key` serialises both forms (the input buffer is 68 zeroed bytes because the
+  vendored `sha256()` reads whole uints past the message end — that latent over-read existed for the
+  33-byte case too and only ever worked because the padding bytes happened to be zero); result flag
+  `0x40000000` = uncompressed. `gpu.py`/`cgpu.py` decode it (`hit_name`).
+* `cgpu.py`: `BLM_BLMC_ARGS` is appended to every blmc call; with `--paths ext` the GPU side is
+  skipped and blmc takes all 100 parts. `queue.sh LIST` runs entries sequentially inside one
+  `run.sh` job; `queue3.lst` is the coverage re-run order.
+* Tests: `c/test_blmc.py` +7 checks (derive vs blm.py for uncompressed and for all 10 ext paths;
+  planted uncompressed hit found and labelled, missed with `--compressed-only`; checksum-invalid plant
+  invisible by default, found with `--nochecksum`, seeds == combos, `--count --nochecksum` == space;
+  planted hit at each ext path missed by std / found by ext with the right label and key form).
+  `gpu/test_cgpu.py` +4 (kernel flag; end-to-end uncompressed hit via the GPU; `--nochecksum` via the
+  feed with seeds == combos; `--paths ext` via cgpu with the GPU off). **ALL PASS on both builds.**
+
+## Runs (queue3, M1) — results appended below as they finish

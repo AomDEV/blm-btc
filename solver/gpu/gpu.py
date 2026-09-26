@@ -24,6 +24,13 @@ BASE = ["common", "ripemd", "sha2", "mnemonic_constants", "secp256k1_common",
         "secp256k1_scalar", "secp256k1_field", "secp256k1_group", "secp256k1_prec",
         "secp256k1", "address"]
 CANARY_FLAG = 0x80000000
+UNC_FLAG = 0x40000000        # kernel: the hash160 of the UNCOMPRESSED (04||x||y) pubkey matched
+PATH_MASK = 0x3fffffff
+
+def hit_name(paths, v):
+    """result word -> path string, plus ' key=uncompressed' when the 04-form hash matched"""
+    v = int(v)
+    return paths[(v & PATH_MASK) - 1] + (" key=uncompressed" if v & UNC_FLAG else "")
 
 def _wide_paths():
     P=[]
@@ -171,7 +178,7 @@ def _control(gpu, words, k, label, path=None):
     node = blm.derive(blm.master_from_seed(blm.mnemonic_to_seed(mn)), path)
     gpu.set_target(blm.h160s(node)[0])
     res = gpu.check(words_to_tuple(words)[None, :])
-    got = gpu.paths[int(res[0]) - 1] if res[0] else "none"
+    got = hit_name(gpu.paths, res[0]) if res[0] else "none"
     want = solve_pname(path)
     ok = got == want
     print(f"   {label:34s} len={len(mn):3d}B  planted {want:18s} -> gpu {got:18s} {'OK' if ok else 'FAIL'}")
@@ -203,8 +210,8 @@ def selftest(gpu):
                       (44 | blm.HARD, 0 | blm.HARD, 0 | blm.HARD, 0, 7))
     gpu.set_target(blm.h160s(node)[0])
     res = gpu.check(t)
-    ok2 = int(res[-1]) == 8 and np.count_nonzero(res[:-1]) == 0
-    print(f"   {'planted at last row of 2 full batches':34s} -> last={int(res[-1])-1}, other nonzero={int(np.count_nonzero(res[:-1]))}   {'OK' if ok2 else 'FAIL'}")
+    ok2 = (int(res[-1]) & PATH_MASK) == 8 and int(res[-1]) & UNC_FLAG == 0 and np.count_nonzero(res[:-1]) == 0
+    print(f"   {'planted at last row of 2 full batches':34s} -> last={(int(res[-1]) & PATH_MASK)-1}, other nonzero={int(np.count_nonzero(res[:-1]))}   {'OK' if ok2 else 'FAIL'}")
     ok &= ok2
     if gpu.mode == "wide":
         print("[gpu] wide-only paths (invisible to the narrow kernel):")

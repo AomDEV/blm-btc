@@ -176,7 +176,7 @@ if __name__ == "__main__":
         os.environ["BLM_TARGET_H160"] = h.hex()
         g.close(); g = GPUProc(mode=mode, n_addr=32, verbose=False)
         res = g.check(words_to_tuple(words)[None, :])
-        got = g.paths[int(res[0]) - 1] if res[0] else "none"
+        got = G.hit_name(g.paths, res[0]) if res[0] else "none"
         print(f"   planted {name:18s} -> {got:18s} {'OK' if got == name else 'FAIL'}")
         ok &= got == name
     g.close()
