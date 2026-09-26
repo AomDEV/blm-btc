@@ -1376,3 +1376,28 @@ gold world glove second food. All derivations on 12 paths x 2 key forms.
 Conclusion: within one or two word errors, any order of the uncertain slots, and the 20 best passphrases,
 the tidy set does not produce the address. The remaining hypotheses are ≥3 wrong words, a word outside
 the picture vocabulary, a different word count, or a passphrase outside the list.
+
+## 2026-09-27 — eye@9 and pyramid@11 re-checked against a fitted dial
+Dial fitted from the nine visible digits with the clock's 30° pitch: numeral 12 at 158.6° (math
+convention about the centre (471.5,940)); residuals ≤ 0.9° for eight digits, −5.3° for the 9. Offsets
+from the nearest numeral bisector, elements and hands alike:
+
+| element | angle | sector (sum) | off the bisector | radius |
+|---|---|---|---|---|
+| TOWER hand | 116.9° | 1–2 (3) | +3.3° | — |
+| MOON hand | 145.9° | 12–1 (13) | +2.3° | — |
+| hour hand | 209.5° | 10–11 (21) | +6.0° | — |
+| **eye** (pupil) | 27.9° | **4–5 (9)** | **+4.3°** | 203 |
+| **pyramid** (ink centroid of the body) | 352.7° | **5–6 (11)** | **−0.9°** | 176 |
+| seal ring centre | 0.0° | 5–6 | +6.4° | 178 |
+| hidden digit 5 / 6 spots | 9.2° / 339.3° | — | −14.3° / −14.3° | 187 |
+
+The eye and the pyramid sit on the digit ring (r ≈ 176–203 vs 187 for the numerals) and as close to
+their sector bisectors as the three labelled hands sit to theirs; the pyramid is dead on. The dial's
+missing 5 and 6 are missing because the two objects occupy that arc — the author put them where the
+numerals would be, at the 4|5 and 5|6 midpoints, and the seal's centre lies exactly on the horizontal
+through the clock centre. The alternative "the object replaces the digit it covers" reading (eye@5,
+pyramid@6) fails: the objects are 14° from the digit spots. Other seal parts (mottos, ribbon curls) fall
+near the 3|4 (7) and 6|7 (13) bisectors, positions already taken by measured pairs, so the seal
+contributes exactly two pairs. **Verdict: eye@9 and pyramid@11 stand at the same grade as tower@3 and
+moon@13.**
